@@ -1,0 +1,8 @@
+cradle:
+  cabal:
+    - path: "src"
+      component: "lib:scheme-interpreter"
+    - path: "app"
+      component: "exe:scheme-interpreter"
+    - path: "test/haskell"
+      component: "test:scheme-interpreter-test"
