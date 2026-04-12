@@ -21,13 +21,39 @@ common lang
         -Wmissing-import-lists
         -funbox-strict-fields
 
+library
+    import:           lang
+    exposed-modules:  Sample.Types
+                    , Sample.Parser
+                    , Sample.Eval
+                    , Sample.Printer
+                    , Sample.Interpreter
+    build-depends:    base >=4.20 && <5
+                    , relude ^>=1.2
+                    , text
+    mixins:           base hiding (Prelude)
+                    , relude (Relude as Prelude)
+    hs-source-dirs:   src
+
 executable scheme-interpreter
     import:           lang
     main-is:          Main.hs
-    build-depends:
-        base >=4.20 && <5
-      , relude ^>=1.2
-    mixins:
-        base hiding (Prelude)
-      , relude (Relude as Prelude)
+    build-depends:    base >=4.20 && <5
+                    , scheme-interpreter
+                    , relude ^>=1.2
+    mixins:           base hiding (Prelude)
+                    , relude (Relude as Prelude)
     hs-source-dirs:   app
+
+test-suite scheme-interpreter-test
+    import:           lang
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    hs-source-dirs:   test/haskell
+    build-depends:    base >=4.20 && <5
+                    , scheme-interpreter
+                    , relude ^>=1.2
+                    , text
+                    , HUnit
+    mixins:           base hiding (Prelude)
+                    , relude (Relude as Prelude)
