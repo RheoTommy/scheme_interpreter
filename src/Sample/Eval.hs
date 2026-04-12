@@ -8,9 +8,9 @@ eval (SNum n) = Right (SNum n)
 eval (SSym s) = Left $ "Unbound variable: " <> s
 eval SNil = Right SNil
 eval (SPair (SSym op) args) = case op of
-  "+" -> applyArith sum 0 args
+  "+" -> applyArith sum args
   "-" -> applySub args
-  "*" -> applyArith product 1 args
+  "*" -> applyArith product args
   "/" -> applyDiv args
   _ -> Left $ "Unknown operator: " <> op
 eval (SPair f _) = Left $ "Not a procedure: " <> show f
@@ -27,8 +27,8 @@ expectNum (SNum n) = Right n
 expectNum other = Left $ "Not a number: " <> show other
 
 -- | Evaluate arguments and apply an arithmetic fold.
-applyArith :: ([Integer] -> Integer) -> Integer -> SExpr -> Either Text SExpr
-applyArith f _identity args = do
+applyArith :: ([Integer] -> Integer) -> SExpr -> Either Text SExpr
+applyArith f args = do
   exprs <- sexpToList args
   vals <- mapM (eval >=> expectNum) exprs
   Right $ SNum (f vals)
