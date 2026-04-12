@@ -1,0 +1,31 @@
+# === Enable built-in groups ===
+- group: {name: partial, enabled: true}
+- group: {name: partial-strict, enabled: true}
+- group: {name: generalise, enabled: true}
+- group: {name: generalise-for-conciseness, enabled: true}
+- group: {name: future, enabled: true}
+- group: {name: dollar, enabled: true}
+- group: {name: teaching, enabled: true}
+
+# === Non-Prelude partial functions (not covered by built-in groups) ===
+- functions:
+  # containers
+  - {name: "Data.Map.!", message: "Use Data.Map.Strict.lookup instead"}
+  - {name: "Data.Map.Lazy.!", message: "Use Data.Map.Strict.lookup instead"}
+  - {name: "Data.Map.Strict.!", message: "Use Data.Map.Strict.lookup instead"}
+  - {name: "Data.IntMap.!", message: "Use Data.IntMap.Strict.lookup instead"}
+  # vector
+  - {name: "Data.Vector.!", message: "Use Data.Vector.!? instead"}
+  # unsafe
+  - {name: "GHC.IO.Unsafe.unsafePerformIO", message: "Avoid unsafePerformIO"}
+  - {name: "Unsafe.Coerce.unsafeCoerce", message: "Avoid unsafeCoerce"}
+
+# === Prefer Strict module variants ===
+- modules:
+  - {name: Data.Map, message: "Use Data.Map.Strict instead"}
+  - {name: Data.Map.Lazy, message: "Use Data.Map.Strict instead"}
+  - {name: Data.IntMap, message: "Use Data.IntMap.Strict instead"}
+  - {name: Data.IntMap.Lazy, message: "Use Data.IntMap.Strict instead"}
+  - {name: Control.Monad.State.Lazy, message: "Use Control.Monad.State.Strict instead"}
+  - {name: Control.Monad.Writer.Lazy, message: "Use Control.Monad.Writer.Strict instead"}
+  - {name: Control.Monad.RWS.Lazy, message: "Use Control.Monad.RWS.Strict instead"}
