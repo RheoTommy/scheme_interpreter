@@ -8,11 +8,11 @@ eval (SNum n) = Right (SNum n)
 eval (SSym s) = Left $ "Unbound variable: " <> s
 eval SNil = Right SNil
 eval (SPair (SSym op) args) = case op of
-  "+" -> applyArith sum args
-  "-" -> applySub args
-  "*" -> applyArith product args
-  "/" -> applyDiv args
-  _ -> Left $ "Unknown operator: " <> op
+    "+" -> applyArith sum args
+    "-" -> applySub args
+    "*" -> applyArith product args
+    "/" -> applyDiv args
+    _ -> Left $ "Unknown operator: " <> op
 eval (SPair f _) = Left $ "Not a procedure: " <> show f
 
 -- | Collect S-expression list into a Haskell list.
@@ -29,26 +29,26 @@ expectNum other = Left $ "Not a number: " <> show other
 -- | Evaluate arguments and apply an arithmetic fold.
 applyArith :: ([Integer] -> Integer) -> SExpr -> Either Text SExpr
 applyArith f args = do
-  exprs <- sexpToList args
-  vals <- mapM (eval >=> expectNum) exprs
-  Right $ SNum (f vals)
+    exprs <- sexpToList args
+    vals <- mapM (eval >=> expectNum) exprs
+    Right $ SNum (f vals)
 
 -- | Subtraction: requires at least one argument.
 applySub :: SExpr -> Either Text SExpr
 applySub args = do
-  exprs <- sexpToList args
-  vals <- mapM (eval >=> expectNum) exprs
-  case vals of
-    [] -> Left "'-' requires at least one argument"
-    [x] -> Right $ SNum (negate x)
-    (x : xs) -> Right $ SNum (x - sum xs)
+    exprs <- sexpToList args
+    vals <- mapM (eval >=> expectNum) exprs
+    case vals of
+        [] -> Left "'-' requires at least one argument"
+        [x] -> Right $ SNum (negate x)
+        (x : xs) -> Right $ SNum (x - sum xs)
 
 -- | Division: exactly two arguments.
 applyDiv :: SExpr -> Either Text SExpr
 applyDiv args = do
-  exprs <- sexpToList args
-  vals <- mapM (eval >=> expectNum) exprs
-  case vals of
-    [_, 0] -> Left "Division by zero"
-    [a, b] -> Right $ SNum (a `div` b {- HLINT ignore "Avoid partial function" -})
-    _ -> Left "'/': expects exactly 2 arguments"
+    exprs <- sexpToList args
+    vals <- mapM (eval >=> expectNum) exprs
+    case vals of
+        [_, 0] -> Left "Division by zero"
+        [a, b] -> Right $ SNum (a `div` b {- HLINT ignore "Avoid partial function" -})
+        _ -> Left "'/': expects exactly 2 arguments"

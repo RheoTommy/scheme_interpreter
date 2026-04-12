@@ -1,0 +1,19 @@
+[tasks.build]
+description = "Build the project"
+run = "cabal build"
+
+[tasks.test]
+description = "Run test suite"
+run = "cabal test"
+
+[tasks.lint]
+description = "Run HLint on source files"
+run = "hlint src/ app/ test/haskell/"
+
+[tasks.format]
+description = "Format source files with fourmolu"
+run = "fourmolu --mode inplace src/ app/ test/haskell/"
+
+[tasks.fix]
+description = "Build, test, lint, and format before PR"
+depends = ["test", "lint", "format"]
