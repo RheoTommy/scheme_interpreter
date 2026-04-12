@@ -6,14 +6,14 @@ run = "cabal build"
 description = "Run test suite"
 run = "cabal test"
 
-[tasks.hlint]
+[tasks.lint]
 description = "Run HLint on source files"
 run = "hlint src/ app/ test/haskell/"
 
-[tasks.fourmolu]
-description = "Check formatting with fourmolu"
+[tasks.format]
+description = "Format source files with fourmolu"
 run = "fourmolu --mode inplace src/ app/ test/haskell/"
 
-[tasks.check]
-description = "Run build, test, hlint, and fourmolu"
-depends = ["build", "test", "hlint", "fourmolu"]
+[tasks.fix]
+description = "Build, test, lint, and format before PR"
+depends = ["test", "lint", "format"]
