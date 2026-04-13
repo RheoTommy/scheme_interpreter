@@ -1,9 +1,10 @@
 [tasks.build]
 description = "Build the project"
-run = "cabal build"
+run = "cabal build --ghc-options=-Werror"
 
 [tasks.test]
 description = "Run test suite"
+depends = ["build"]
 run = "cabal test"
 
 [tasks.lint]
@@ -16,4 +17,4 @@ run = "fourmolu --mode inplace src/ app/ test/haskell/"
 
 [tasks.fix]
 description = "Build, test, lint, and format before PR"
-depends = ["test", "lint", "format"]
+depends = ["build", "test", "lint", "format"]
