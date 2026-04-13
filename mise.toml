@@ -17,9 +17,9 @@ run = "fourmolu --mode inplace src/ app/ test/haskell/"
 
 [tasks.fix]
 description = "Format, lint, build, and test before PR"
-run = """
-fourmolu --mode inplace src/ app/ test/haskell/
-hlint src/ app/ test/haskell/
-cabal build --ghc-options=-Werror
-cabal test --ghc-options=-Werror
-"""
+run = [
+    "fourmolu --mode inplace src/ app/ test/haskell/",
+    "hlint src/ app/ test/haskell/",
+    "cabal build --ghc-options=-Werror",
+    "cabal test --ghc-options=-Werror",
+]
