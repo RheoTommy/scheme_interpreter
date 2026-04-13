@@ -1,4 +1,9 @@
 module Scheme.AST (
+    -- * Identifiers
+    Id,
+    mkId,
+    idToText,
+
     -- * Top-level forms
     Toplevel (TDefine, TExpr, TLoad),
 
@@ -27,12 +32,30 @@ module Scheme.AST (
     -- * Constants
     Literal (LNum, LBool, LStr, LNil),
 
+    -- * Cond clauses
+    CondClauses (CondClauses, CondElseOnly),
+
     -- * Supporting types
     Params (Params),
     Body (Body),
 ) where
 
+import Data.Text qualified as T (null)
 import Scheme.SExpr (SExpr)
+
+-- | Scheme identifier. Guaranteed non-empty by the smart constructor 'mkId'.
+newtype Id = UnsafeId Text
+    deriving newtype (Show, Eq, Ord)
+
+-- | Construct an 'Id' from non-empty text. Returns 'Nothing' for empty input.
+mkId :: Text -> Maybe Id
+mkId t
+    | T.null t = Nothing
+    | otherwise = Just (UnsafeId t)
+
+-- | Extract the underlying text from an 'Id'.
+idToText :: Id -> Text
+idToText (UnsafeId t) = t
 
 {- | Top-level form: expression, definition, or load directive.
 
@@ -51,7 +74,7 @@ data Toplevel
 The sugar @(define (f x y) body)@ is desugared to
 @(define f (lambda (x y) body))@ by the analyzer.
 -}
-data Define = Define Text Expr
+data Define = Define Id Expr
     deriving stock (Show, Eq)
 
 {- | Expression.
@@ -62,7 +85,7 @@ data Expr
     = -- | Literal constant: number, boolean, string, or nil.
       ELit Literal
     | -- | Variable reference.
-      EVar Text
+      EVar Id
     | -- | Lambda abstraction: @(lambda Arg Body)@
       ELambda Params Body
     | -- | Function application: @(Exp Exp*)@
@@ -70,21 +93,19 @@ data Expr
     | -- | Quoted S-expression. The contents remain as SExpr, not converted to AST.
       EQuote SExpr
     | -- | Assignment: @(set! Id Exp)@
-      ESet Text Expr
+      ESet Id Expr
     | {- | Let binding: @(let [Id] Bindings Body)@
-      The optional Text is the name for named let.
+      The optional Id is the name for named let.
       -}
-      ELet (Maybe Text) [(Text, Expr)] Body
+      ELet (Maybe Id) [(Id, Expr)] Body
     | -- | Sequential let: @(let* Bindings Body)@
-      ELetStar [(Text, Expr)] Body
+      ELetStar [(Id, Expr)] Body
     | -- | Recursive let: @(letrec Bindings Body)@
-      ELetrec [(Text, Expr)] Body
+      ELetrec [(Id, Expr)] Body
     | -- | Conditional: @(if Exp Exp [Exp])@
       EIf Expr Expr (Maybe Expr)
-    | {- | Multi-way conditional: @(cond (Exp Exp+)* [(else Exp+)])@
-      Each clause is (test, body). The else branch is separate.
-      -}
-      ECond [(Expr, NonEmpty Expr)] (Maybe (NonEmpty Expr))
+    | -- | Multi-way conditional: @(cond ...)@. See 'CondClauses'.
+      ECond CondClauses
     | -- | Short-circuit and: @(and Exp*)@
       EAnd [Expr]
     | -- | Short-circuit or: @(or Exp*)@
@@ -94,7 +115,7 @@ data Expr
     | {- | Iteration: @(do ((Id Exp Exp)*) (Exp Exp*) Body)@
       (bindings, (test, results), body)
       -}
-      EDo [(Text, Expr, Expr)] (Expr, [Expr]) Body
+      EDo [(Id, Expr, Expr)] (Expr, [Expr]) Body
     deriving stock (Show, Eq)
 
 {- | Literal constant.
@@ -108,6 +129,20 @@ data Literal
     | LNil
     deriving stock (Show, Eq)
 
+{- | Cond clauses.
+
+> (cond (Exp Exp+)* [(else Exp+)])
+
+The spec requires at least one clause (note 5), and at most one else clause.
+This type makes @(cond)@ (zero clauses, no else) unrepresentable.
+-}
+data CondClauses
+    = -- | One or more test clauses, optional else: @(cond (test body+)+ [(else body+)])@
+      CondClauses (NonEmpty (Expr, NonEmpty Expr)) (Maybe (NonEmpty Expr))
+    | -- | Else clause only: @(cond (else body+))@
+      CondElseOnly (NonEmpty Expr)
+    deriving stock (Show, Eq)
+
 {- | Lambda parameter specification.
 
 > Arg ::= Id | (Id* [Id . Id])
@@ -118,7 +153,7 @@ Examples:
   @(lambda (x . rest) ...)@  → @Params ["x"] (Just "rest")@
   @(lambda args ...)@        → @Params [] (Just "args")@
 -}
-data Params = Params [Text] (Maybe Text)
+data Params = Params [Id] (Maybe Id)
     deriving stock (Show, Eq)
 
 {- | Body of lambda, let, etc.
