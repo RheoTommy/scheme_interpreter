@@ -5,7 +5,7 @@ run = "cabal build --ghc-options=-Werror"
 [tasks.test]
 description = "Run test suite"
 depends = ["build"]
-run = "cabal test"
+run = "cabal test --ghc-options=-Werror"
 
 [tasks.lint]
 description = "Run HLint on source files"
@@ -16,5 +16,10 @@ description = "Format source files with fourmolu"
 run = "fourmolu --mode inplace src/ app/ test/haskell/"
 
 [tasks.fix]
-description = "Build, test, lint, and format before PR"
-depends = ["build", "test", "lint", "format"]
+description = "Format, lint, build, and test before PR"
+run = """
+fourmolu --mode inplace src/ app/ test/haskell/
+hlint src/ app/ test/haskell/
+cabal build --ghc-options=-Werror
+cabal test --ghc-options=-Werror
+"""
