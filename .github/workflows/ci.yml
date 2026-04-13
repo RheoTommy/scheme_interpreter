@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   build-and-test:
@@ -30,7 +29,7 @@ jobs:
         run: cabal build --only-dependencies
 
       - name: Build
-        run: cabal build
+        run: cabal build --ghc-options=-Werror
 
       - name: Test
         run: cabal test
