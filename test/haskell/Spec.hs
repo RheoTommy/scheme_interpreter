@@ -68,6 +68,8 @@ parserNums =
             , testParse "-42" (SNum (-42))
             , testParse "999999" (SNum 999999)
             , testParse "  42  " (SNum 42) -- whitespace
+            , testParse "+42" (SNum 42)
+            , testParse "+0" (SNum 0)
             ]
 
 parserBools :: Test
@@ -121,6 +123,8 @@ parserQuote =
             , testParse "'(1 2 3)" (slist [SSym "quote", slist [SNum 1, SNum 2, SNum 3]])
             , testParse "''x" (slist [SSym "quote", slist [SSym "quote", SSym "x"]])
             , testParse "'()" (slist [SSym "quote", SNil])
+            , testParse "' x" (slist [SSym "quote", SSym "x"]) -- space after quote
+            , testParse "' ;comment\nx" (slist [SSym "quote", SSym "x"]) -- comment after quote
             ]
 
 parserLists :: Test
@@ -176,6 +180,8 @@ parserEdgeCases =
               testParse "-" (SSym "-")
             , testParse "-a" (SSym "-a")
             , testParse "-3" (SNum (-3))
+            , testParse "+3" (SNum 3)
+            , testParse "+a" (SSym "+a")
             , testParse "1+" (SSym "1+")
             , testParse "1-" (SSym "1-")
             , -- Nested quotes and lists
