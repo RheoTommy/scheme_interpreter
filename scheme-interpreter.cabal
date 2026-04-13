@@ -23,7 +23,9 @@ common lang
 
 library
     import:           lang
-    exposed-modules:  Sample.Types
+    exposed-modules:  Scheme.SExpr
+                    , Scheme.Parser
+                    , Sample.Types
                     , Sample.Parser
                     , Sample.Eval
                     , Sample.Printer
@@ -31,6 +33,7 @@ library
     build-depends:    base >=4.20 && <5
                     , relude ^>=1.2
                     , text
+                    , megaparsec ^>=9.7
     mixins:           base hiding (Prelude)
                     , relude (Relude as Prelude)
     hs-source-dirs:   src
