@@ -20,6 +20,9 @@
   - {name: "GHC.IO.Unsafe.unsafePerformIO", message: "Avoid unsafePerformIO"}
   - {name: "Unsafe.Coerce.unsafeCoerce", message: "Avoid unsafeCoerce"}
 
+# === Ignore hints incompatible with relude ===
+- ignore: {name: "Use isEOF"} # isEOF is not re-exported by relude; hIsEOF stdin is the correct form
+
 # === Prefer Strict module variants ===
 - modules:
   - {name: Data.Map, message: "Use Data.Map.Strict instead"}
