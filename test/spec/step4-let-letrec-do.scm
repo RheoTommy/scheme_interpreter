@@ -72,12 +72,14 @@ let-mut                             ;; => 10
 
 ;; Simple counting loop
 (do ((i 0 (+ i 1)))
-    ((= i 5) i))                    ;; => 5
+    ((= i 5) i)
+  #f)                               ;; => 5
 
 ;; Factorial with do
 (do ((n 5 (- n 1))
      (acc 1 (* acc n)))
-    ((= n 0) acc))                  ;; => 120
+    ((= n 0) acc)
+  #f)                               ;; => 120
 
 ;; do with body (side effects)
 (define do-sum 0)
@@ -88,8 +90,10 @@ do-sum                              ;; => 15
 
 ;; do with multiple result expressions (returns last)
 (do ((i 0 (+ i 1)))
-    ((= i 1) 'a 'b))               ;; => b
+    ((= i 1) 'a 'b)
+  #f)                               ;; => b
 
 ;; do with no result expression (unspecified return)
 (do ((i 0 (+ i 1)))
-    ((= i 1)))                     ;; => (unspecified)
+    ((= i 1))
+  #f)                               ;; => (unspecified)
