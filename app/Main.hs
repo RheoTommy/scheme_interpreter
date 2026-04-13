@@ -1,5 +1,7 @@
 module Main (main) where
 
+import Data.Char (isSpace)
+import Data.List (dropWhileEnd)
 import Scheme.Parser (parseSExpr, prettyError)
 
 main :: IO ()
@@ -16,8 +18,10 @@ repl = do
         then putTextLn ""
         else do
             line <- getLine
-            unless (line == ":q") $ do
-                case parseSExpr line of
-                    Right sexpr -> print sexpr
-                    Left err -> putStrLn (prettyError err)
+            let input = toText . dropWhileEnd isSpace . dropWhile isSpace $ toString line
+            unless (input == ":q") $ do
+                unless (input == "") $
+                    case parseSExpr input of
+                        Right sexpr -> print sexpr
+                        Left err -> putStrLn (prettyError err)
                 repl
