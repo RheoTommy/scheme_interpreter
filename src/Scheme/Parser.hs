@@ -1,4 +1,4 @@
-module Scheme.Parser (parseSExpr, parseFile, ParseError) where
+module Scheme.Parser (parseSExpr, parseFile, ParseError, prettyError) where
 
 import Data.Char qualified as Char
 import Data.Text qualified as T
@@ -21,6 +21,10 @@ import Text.Megaparsec.Char.Lexer qualified as L
 
 -- | Parse error type exposed to callers.
 type ParseError = M.ParseErrorBundle Text Void
+
+-- | Render a parse error as a human-readable string.
+prettyError :: ParseError -> String
+prettyError = M.errorBundlePretty
 
 -- | Parser type: parses Text with no custom error component.
 type Parser = Parsec Void Text
