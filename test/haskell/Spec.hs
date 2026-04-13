@@ -111,6 +111,9 @@ parserSymbols =
             , testParse "a1" (SSym "a1")
             , testParse "$x" (SSym "$x")
             , testParse "<=?" (SSym "<=?")
+            , testParseFail "\955" -- λ (Greek letter)
+            , testParseFail "\1633\1634" -- ١٢ (Arabic-Indic digits)
+            , testParseFail "\12354" -- あ (Hiragana)
             ]
 
 parserQuote :: Test

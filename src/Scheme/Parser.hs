@@ -156,7 +156,4 @@ sSym = do
 -- | Characters allowed in identifiers: [0-9A-Za-z!$%&*+-./<=>?@^_]
 isIdChar :: Char -> Bool
 isIdChar c =
-    Char.isAsciiUpper c
-        || Char.isAsciiLower c
-        || Char.isDigit c
-        || c `elem` ("!$%&*+-./<=>?@^_" :: [Char])
+    Char.isAscii c && (Char.isAlphaNum c || c `elem` ("!$%&*+-./<=>?@^_" :: [Char]))
