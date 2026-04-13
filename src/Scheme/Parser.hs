@@ -136,7 +136,7 @@ sList = between (symbol "(") (single ')') $ do
         Nothing -> pure $ foldr SPair SNil elems
         Just _ -> do
             when (null elems) $ fail "Expected datum before dot"
-            (\tail -> foldr SPair tail elems) <$> sExpr
+            (\tl -> foldr SPair tl elems) <$> sExpr
   where
     -- A dot separator: a '.' not followed by identifier characters.
     dot :: Parser Char
