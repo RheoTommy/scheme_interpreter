@@ -73,10 +73,10 @@ TODO: Support hex (#x), octal (#o), binary (#b) literals if needed.
 -}
 sNum :: Parser SExpr
 sNum = do
-    sign <- M.optional (single '-')
+    sign <- M.optional (choice [single '-', single '+'])
     digits <- takeWhile1P (Just "digit") Char.isDigit
     notFollowedBy (satisfy isIdChar)
-    let numText = maybe digits (\_ -> "-" <> digits) sign
+    let numText = maybe digits (\s -> if s == '+' then digits else "-" <> digits) sign
     -- readMaybe always succeeds here since numText matches [-]?[0-9]+,
     -- but we handle Nothing for totality.
     case readMaybe (T.unpack numText) of
@@ -123,6 +123,7 @@ sStr = SStr . T.pack <$> between (single '"') (single '"') (many stringChar)
 sQuote :: Parser SExpr
 sQuote = do
     _ <- single '\''
+    sc
     x <- sExpr
     pure $ SPair (SSym "quote") (SPair x SNil)
 
@@ -135,7 +136,7 @@ sList = between (symbol "(") (single ')') $ do
         Nothing -> pure $ foldr SPair SNil elems
         Just _ -> do
             when (null elems) $ fail "Expected datum before dot"
-            foldr SPair <$> sExpr <*> pure elems
+            (\tail -> foldr SPair tail elems) <$> sExpr
   where
     -- A dot separator: a '.' not followed by identifier characters.
     dot :: Parser Char
