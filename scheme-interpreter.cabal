@@ -27,6 +27,10 @@ library
                     , Scheme.AST
                     , Scheme.Analyzer
                     , Scheme.Parser
+                    , Scheme.Runtime
+                    , Scheme.Builtin
+                    , Scheme.Evaluator
+                    , Scheme.Interpreter
                     , Sample.Types
                     , Sample.Parser
                     , Sample.Eval
@@ -36,6 +40,8 @@ library
                     , relude ^>=1.2
                     , text
                     , megaparsec ^>=9.7
+                    , containers
+                    , mtl
     mixins:           base hiding (Prelude)
                     , relude (Relude as Prelude)
     hs-source-dirs:   src
