@@ -2,6 +2,18 @@ module Main (main) where
 
 import Data.Text qualified as T
 import Sample.Interpreter (run)
+import Scheme.AST (
+    Body (Body),
+    CondClauses (CondClauses, CondElseOnly),
+    Define (Define),
+    Expr (EAnd, EApp, EBegin, ECond, EDo, EIf, ELambda, ELet, ELetStar, ELetrec, ELit, EOr, EQuote, ESet, EVar),
+    Id,
+    Literal (LBool, LNil, LNum, LStr),
+    Params (Params),
+    Toplevel (TDefine, TLoad),
+    mkId,
+ )
+import Scheme.Analyzer (analyze, analyzeToplevel)
 import Scheme.Parser (parseFile, parseSExpr)
 import Scheme.SExpr (SExpr (SBool, SNil, SNum, SPair, SStr, SSym))
 import Test.HUnit (
@@ -209,6 +221,299 @@ parserFile =
             , testParseFile "; comment\n42 ; trailing\n#t" [SNum 42, SBool True]
             ]
 
+-- * Analyzer test helpers
+
+-- | Unsafe mkId for tests — panics on empty input.
+id' :: Text -> Id
+id' t = case mkId t of
+    Just i -> i
+    Nothing -> error "id': empty identifier in test"
+
+-- | Parse then analyze, compare with expected Expr.
+testAnalyze :: Text -> Expr -> Test
+testAnalyze input expected =
+    T.unpack input ~: case parseSExpr input of
+        Left err -> assertFailure $ "Parse failed: " <> show err
+        Right sexpr -> case analyze sexpr of
+            Right actual -> assertEqual "" expected actual
+            Left err -> assertFailure $ "Analyze failed: " <> show err
+
+-- | Parse then analyzeToplevel, compare with expected Toplevel.
+testAnalyzeTL :: Text -> Toplevel -> Test
+testAnalyzeTL input expected =
+    T.unpack input ~: case parseSExpr input of
+        Left err -> assertFailure $ "Parse failed: " <> show err
+        Right sexpr -> case analyzeToplevel sexpr of
+            Right actual -> assertEqual "" expected actual
+            Left err -> assertFailure $ "Analyze failed: " <> show err
+
+-- | Parse then analyze, expect failure.
+testAnalyzeFail :: Text -> Test
+testAnalyzeFail input =
+    (T.unpack input <> " => FAIL") ~: case parseSExpr input of
+        Left err -> assertFailure $ "Parse failed (expected analyze error): " <> show err
+        Right sexpr -> case analyze sexpr of
+            Left _ -> pure ()
+            Right v -> assertFailure $ "Expected analyze error, got: " <> show v
+
+-- | Parse then analyzeToplevel, expect failure.
+testAnalyzeTLFail :: Text -> Test
+testAnalyzeTLFail input =
+    (T.unpack input <> " => FAIL") ~: case parseSExpr input of
+        Left err -> assertFailure $ "Parse failed (expected analyze error): " <> show err
+        Right sexpr -> case analyzeToplevel sexpr of
+            Left _ -> pure ()
+            Right v -> assertFailure $ "Expected analyze error, got: " <> show v
+
+-- * Analyzer tests
+
+analyzerLiterals :: Test
+analyzerLiterals =
+    "Analyzer: literals"
+        ~: TestList
+            [ testAnalyze "42" (ELit (LNum 42))
+            , testAnalyze "#t" (ELit (LBool True))
+            , testAnalyze "#f" (ELit (LBool False))
+            , testAnalyze "\"hello\"" (ELit (LStr "hello"))
+            , testAnalyze "()" (ELit LNil)
+            ]
+
+analyzerVariables :: Test
+analyzerVariables =
+    "Analyzer: variables"
+        ~: TestList
+            [ testAnalyze "x" (EVar (id' "x"))
+            , testAnalyze "+" (EVar (id' "+"))
+            , testAnalyze "null?" (EVar (id' "null?"))
+            ]
+
+analyzerLambda :: Test
+analyzerLambda =
+    "Analyzer: lambda"
+        ~: TestList
+            [ -- (lambda (x) x)
+              testAnalyze "(lambda (x) x)" $
+                ELambda (Params [id' "x"] Nothing) (Body [] (EVar (id' "x") :| []))
+            , -- (lambda (x y) (+ x y))
+              testAnalyze "(lambda (x y) (+ x y))" $
+                ELambda
+                    (Params [id' "x", id' "y"] Nothing)
+                    (Body [] (EApp (EVar (id' "+")) [EVar (id' "x"), EVar (id' "y")] :| []))
+            , -- (lambda args args) — rest-only
+              testAnalyze "(lambda args args)" $
+                ELambda (Params [] (Just (id' "args"))) (Body [] (EVar (id' "args") :| []))
+            , -- (lambda (x . rest) rest) — fixed + rest
+              testAnalyze "(lambda (x . rest) rest)" $
+                ELambda (Params [id' "x"] (Just (id' "rest"))) (Body [] (EVar (id' "rest") :| []))
+            , -- lambda with no body
+              testAnalyzeFail "(lambda (x))"
+            , -- duplicate parameter names
+              testAnalyzeFail "(lambda (x x) x)"
+            , testAnalyzeFail "(lambda (x y x) x)"
+            , testAnalyzeFail "(lambda (x . x) x)"
+            ]
+
+analyzerQuote :: Test
+analyzerQuote =
+    "Analyzer: quote"
+        ~: TestList
+            [ testAnalyze "'x" (EQuote (SSym "x"))
+            , testAnalyze "'(1 2 3)" (EQuote (slist [SNum 1, SNum 2, SNum 3]))
+            , testAnalyze "(quote x)" (EQuote (SSym "x"))
+            , testAnalyzeFail "(quote)"
+            , testAnalyzeFail "(quote a b)"
+            ]
+
+analyzerSet :: Test
+analyzerSet =
+    "Analyzer: set!"
+        ~: TestList
+            [ testAnalyze "(set! x 1)" (ESet (id' "x") (ELit (LNum 1)))
+            , testAnalyzeFail "(set! 1 2)"
+            , testAnalyzeFail "(set! x)"
+            ]
+
+analyzerLet :: Test
+analyzerLet =
+    "Analyzer: let"
+        ~: TestList
+            [ -- (let ((x 1)) x)
+              testAnalyze "(let ((x 1)) x)" $
+                ELet Nothing [(id' "x", ELit (LNum 1))] (Body [] (EVar (id' "x") :| []))
+            , -- (let ((x 1) (y 2)) (+ x y))
+              testAnalyze "(let ((x 1) (y 2)) (+ x y))" $
+                ELet
+                    Nothing
+                    [(id' "x", ELit (LNum 1)), (id' "y", ELit (LNum 2))]
+                    (Body [] (EApp (EVar (id' "+")) [EVar (id' "x"), EVar (id' "y")] :| []))
+            , -- Named let: (let loop ((n 0)) n)
+              testAnalyze "(let loop ((n 0)) n)" $
+                ELet (Just (id' "loop")) [(id' "n", ELit (LNum 0))] (Body [] (EVar (id' "n") :| []))
+            , testAnalyzeFail "(let)"
+            , testAnalyzeFail "(let ((x 1)))" -- no body
+            , testAnalyzeFail "(let ((x 1) (x 2)) x)" -- duplicate binding name
+            ]
+
+analyzerLetStar :: Test
+analyzerLetStar =
+    "Analyzer: let*"
+        ~: TestList
+            [ testAnalyze "(let* ((x 1) (y x)) y)" $
+                ELetStar
+                    [(id' "x", ELit (LNum 1)), (id' "y", EVar (id' "x"))]
+                    (Body [] (EVar (id' "y") :| []))
+            , -- let* permits duplicate binding names (later shadows earlier)
+              testAnalyze "(let* ((x 1) (x 2)) x)" $
+                ELetStar
+                    [(id' "x", ELit (LNum 1)), (id' "x", ELit (LNum 2))]
+                    (Body [] (EVar (id' "x") :| []))
+            , testAnalyzeFail "(let*)"
+            ]
+
+analyzerLetrec :: Test
+analyzerLetrec =
+    "Analyzer: letrec"
+        ~: TestList
+            [ testAnalyze "(letrec ((x 1)) x)" $
+                ELetrec [(id' "x", ELit (LNum 1))] (Body [] (EVar (id' "x") :| []))
+            , testAnalyzeFail "(letrec)"
+            , testAnalyzeFail "(letrec ((x 1) (x 2)) x)" -- duplicate binding name
+            ]
+
+analyzerIf :: Test
+analyzerIf =
+    "Analyzer: if"
+        ~: TestList
+            [ testAnalyze "(if #t 1 2)" $
+                EIf (ELit (LBool True)) (ELit (LNum 1)) (Just (ELit (LNum 2)))
+            , testAnalyze "(if #t 1)" $
+                EIf (ELit (LBool True)) (ELit (LNum 1)) Nothing
+            , testAnalyzeFail "(if)"
+            , testAnalyzeFail "(if #t)"
+            , testAnalyzeFail "(if #t 1 2 3)"
+            ]
+
+analyzerCond :: Test
+analyzerCond =
+    "Analyzer: cond"
+        ~: TestList
+            [ -- (cond (#t 1))
+              testAnalyze "(cond (#t 1))" $
+                ECond (CondClauses ((ELit (LBool True), ELit (LNum 1) :| []) :| []) Nothing)
+            , -- (cond (#f 1) (else 2))
+              testAnalyze "(cond (#f 1) (else 2))" $
+                ECond (CondClauses ((ELit (LBool False), ELit (LNum 1) :| []) :| []) (Just (ELit (LNum 2) :| [])))
+            , -- (cond (else 42))
+              testAnalyze "(cond (else 42))" $
+                ECond (CondElseOnly (ELit (LNum 42) :| []))
+            , -- cond with multiple body exprs
+              testAnalyze "(cond (#t 1 2 3))" $
+                ECond (CondClauses ((ELit (LBool True), ELit (LNum 1) :| [ELit (LNum 2), ELit (LNum 3)]) :| []) Nothing)
+            , testAnalyzeFail "(cond)"
+            , testAnalyzeFail "(cond (#t))" -- clause needs body
+            ]
+
+analyzerAndOrBegin :: Test
+analyzerAndOrBegin =
+    "Analyzer: and, or, begin"
+        ~: TestList
+            [ testAnalyze "(and)" (EAnd [])
+            , testAnalyze "(and 1 2)" (EAnd [ELit (LNum 1), ELit (LNum 2)])
+            , testAnalyze "(or)" (EOr [])
+            , testAnalyze "(or 1 2)" (EOr [ELit (LNum 1), ELit (LNum 2)])
+            , testAnalyze "(begin)" (EBegin [])
+            , testAnalyze "(begin 1 2)" (EBegin [ELit (LNum 1), ELit (LNum 2)])
+            ]
+
+analyzerDo :: Test
+analyzerDo =
+    "Analyzer: do"
+        ~: TestList
+            [ -- (do ((i 0 (+ i 1))) ((= i 5) i) (display i))
+              testAnalyze "(do ((i 0 (+ i 1))) ((= i 5) i) (display i))" $
+                EDo
+                    [(id' "i", ELit (LNum 0), EApp (EVar (id' "+")) [EVar (id' "i"), ELit (LNum 1)])]
+                    (EApp (EVar (id' "=")) [EVar (id' "i"), ELit (LNum 5)], [EVar (id' "i")])
+                    (Body [] (EApp (EVar (id' "display")) [EVar (id' "i")] :| []))
+            , -- do with no body is invalid (Body requires Exp+)
+              testAnalyzeFail "(do ((i 0 (+ i 1))) ((= i 5) i))"
+            , testAnalyzeFail "(do)"
+            , -- duplicate do binding variable
+              testAnalyzeFail "(do ((i 0 0) (i 1 1)) ((= i 0) i) i)"
+            ]
+
+analyzerApp :: Test
+analyzerApp =
+    "Analyzer: function application"
+        ~: TestList
+            [ testAnalyze "(f)" (EApp (EVar (id' "f")) [])
+            , testAnalyze "(f 1 2)" (EApp (EVar (id' "f")) [ELit (LNum 1), ELit (LNum 2)])
+            , testAnalyze "((lambda (x) x) 1)" $
+                EApp
+                    (ELambda (Params [id' "x"] Nothing) (Body [] (EVar (id' "x") :| [])))
+                    [ELit (LNum 1)]
+            ]
+
+analyzerDefine :: Test
+analyzerDefine =
+    "Analyzer: define (toplevel)"
+        ~: TestList
+            [ -- (define x 42)
+              testAnalyzeTL "(define x 42)" $
+                TDefine (Define (id' "x") (ELit (LNum 42)))
+            , -- (define (f x) x) => (define f (lambda (x) x))
+              testAnalyzeTL "(define (f x) x)" $
+                TDefine (Define (id' "f") (ELambda (Params [id' "x"] Nothing) (Body [] (EVar (id' "x") :| []))))
+            , -- (define (f x . rest) rest)
+              testAnalyzeTL "(define (f x . rest) rest)" $
+                TDefine (Define (id' "f") (ELambda (Params [id' "x"] (Just (id' "rest"))) (Body [] (EVar (id' "rest") :| []))))
+            , testAnalyzeTLFail "(define)"
+            , testAnalyzeTLFail "(define 1 2)"
+            , -- duplicate parameter names in function sugar
+              testAnalyzeTLFail "(define (f x x) x)"
+            , -- define function sugar without body
+              testAnalyzeTLFail "(define (f x))"
+            ]
+
+analyzerLoad :: Test
+analyzerLoad =
+    "Analyzer: load"
+        ~: TestList
+            [ testAnalyzeTL "(load \"file.scm\")" (TLoad "file.scm")
+            , testAnalyzeTLFail "(load 42)"
+            , testAnalyzeTLFail "(load)"
+            ]
+
+analyzerBody :: Test
+analyzerBody =
+    "Analyzer: body with internal defines"
+        ~: TestList
+            [ -- (lambda () (define x 1) x)
+              testAnalyze "(lambda () (define x 1) x)" $
+                ELambda
+                    (Params [] Nothing)
+                    (Body [Define (id' "x") (ELit (LNum 1))] (EVar (id' "x") :| []))
+            , -- (lambda () (define a 1) (define b 2) (+ a b))
+              testAnalyze "(lambda () (define a 1) (define b 2) (+ a b))" $
+                ELambda
+                    (Params [] Nothing)
+                    ( Body
+                        [Define (id' "a") (ELit (LNum 1)), Define (id' "b") (ELit (LNum 2))]
+                        (EApp (EVar (id' "+")) [EVar (id' "a"), EVar (id' "b")] :| [])
+                    )
+            ]
+
+analyzerErrors :: Test
+analyzerErrors =
+    "Analyzer: error cases"
+        ~: TestList
+            [ -- define in expression context
+              testAnalyzeFail "(+ (define x 1) 2)"
+            , -- load in expression context
+              testAnalyzeFail "(+ (load \"foo.scm\") 1)"
+            , testAnalyzeFail "(load \"foo.scm\")" -- load at expression position
+            ]
+
 -- * Sample interpreter tests (kept from before)
 
 step0 :: Test
@@ -260,6 +565,23 @@ main = do
                 , parserWhitespace
                 , parserEdgeCases
                 , parserFile
+                , analyzerLiterals
+                , analyzerVariables
+                , analyzerLambda
+                , analyzerQuote
+                , analyzerSet
+                , analyzerLet
+                , analyzerLetStar
+                , analyzerLetrec
+                , analyzerIf
+                , analyzerCond
+                , analyzerAndOrBegin
+                , analyzerDo
+                , analyzerApp
+                , analyzerDefine
+                , analyzerLoad
+                , analyzerBody
+                , analyzerErrors
                 , step0
                 , step1
                 ]

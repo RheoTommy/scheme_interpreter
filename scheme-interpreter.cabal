@@ -25,6 +25,7 @@ library
     import:           lang
     exposed-modules:  Scheme.SExpr
                     , Scheme.AST
+                    , Scheme.Analyzer
                     , Scheme.Parser
                     , Sample.Types
                     , Sample.Parser
