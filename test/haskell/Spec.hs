@@ -14,11 +14,28 @@ import Scheme.AST (
     mkId,
  )
 import Scheme.Analyzer (analyze, analyzeToplevel)
+import Scheme.Evaluator (evaluate, initialEnv)
+import Scheme.Interpreter qualified as Interpreter
 import Scheme.Parser (parseFile, parseSExpr)
+import Scheme.Runtime (
+    EvalError (
+        ArityError,
+        DivisionByZero,
+        NotAProcedure,
+        NotImplemented,
+        TypeError,
+        UnboundVariable
+    ),
+    Value (VBool, VNil, VNum, VStr),
+    atomicValueEq,
+    prettyEvalError,
+    runEval,
+    showValue,
+ )
 import Scheme.SExpr (SExpr (SBool, SNil, SNum, SPair, SStr, SSym))
 import Test.HUnit (
     Counts (errors, failures),
-    Test (TestList),
+    Test (TestCase, TestList),
     assertEqual,
     assertFailure,
     runTestTT,
@@ -514,6 +531,246 @@ analyzerErrors =
             , testAnalyzeFail "(load \"foo.scm\")" -- load at expression position
             ]
 
+-- * Evaluator test helpers
+
+-- | Evaluate an 'Expr' in the initial environment.
+runExpr :: Expr -> IO (Either EvalError Value)
+runExpr expr = do
+    env <- initialEnv
+    runEval env (evaluate expr)
+
+{- | Assert that an 'Expr' evaluates to a 'Value' matching 'atomicValueEq'.
+The label is used as the test name.
+-}
+testEvalExpr :: String -> Expr -> Value -> Test
+testEvalExpr label expr expected =
+    label ~: TestCase $ do
+        result <- runExpr expr
+        case result of
+            Right actual ->
+                unless (atomicValueEq actual expected) $
+                    assertFailure
+                        ( "Expected "
+                            <> T.unpack (showValue expected)
+                            <> ", got "
+                            <> T.unpack (showValue actual)
+                        )
+            Left err ->
+                assertFailure $ "Eval failed: " <> T.unpack (prettyEvalError err)
+
+-- | Assert that evaluating an 'Expr' produces an error matching the predicate.
+testEvalExprFailsWith :: String -> Expr -> (EvalError -> Bool) -> Test
+testEvalExprFailsWith label expr matches =
+    (label <> " => ERROR") ~: TestCase $ do
+        result <- runExpr expr
+        case result of
+            Left err
+                | matches err -> pure ()
+                | otherwise ->
+                    assertFailure $
+                        "Error did not match predicate: " <> T.unpack (prettyEvalError err)
+            Right v -> assertFailure $ "Expected error, got: " <> T.unpack (showValue v)
+
+-- * EvalError predicates
+
+isUnboundVariable :: EvalError -> Bool
+isUnboundVariable UnboundVariable{} = True
+isUnboundVariable _ = False
+
+isTypeError :: EvalError -> Bool
+isTypeError TypeError{} = True
+isTypeError _ = False
+
+isArityError :: EvalError -> Bool
+isArityError ArityError{} = True
+isArityError _ = False
+
+isNotAProcedure :: EvalError -> Bool
+isNotAProcedure NotAProcedure{} = True
+isNotAProcedure _ = False
+
+isDivisionByZero :: EvalError -> Bool
+isDivisionByZero DivisionByZero = True
+isDivisionByZero _ = False
+
+isNotImplemented :: EvalError -> Bool
+isNotImplemented NotImplemented{} = True
+isNotImplemented _ = False
+
+-- * AST-building helpers for readable evaluator tests
+
+eNum :: Integer -> Expr
+eNum = ELit . LNum
+
+eBool :: Bool -> Expr
+eBool = ELit . LBool
+
+eStr :: Text -> Expr
+eStr = ELit . LStr
+
+eNil :: Expr
+eNil = ELit LNil
+
+eVar :: Text -> Expr
+eVar name = EVar (id' name)
+
+eApp :: Text -> [Expr] -> Expr
+eApp name = EApp (eVar name)
+
+-- * Evaluator tests (Expr -> Value)
+
+evaluatorLiterals :: Test
+evaluatorLiterals =
+    "Evaluator: literals"
+        ~: TestList
+            [ testEvalExpr "42" (eNum 42) (VNum 42)
+            , testEvalExpr "0" (eNum 0) (VNum 0)
+            , testEvalExpr "-1" (eNum (-1)) (VNum (-1))
+            , testEvalExpr "#t" (eBool True) (VBool True)
+            , testEvalExpr "#f" (eBool False) (VBool False)
+            , testEvalExpr "\"hello\"" (eStr "hello") (VStr "hello")
+            , testEvalExpr "()" eNil VNil
+            ]
+
+evaluatorArith :: Test
+evaluatorArith =
+    "Evaluator: arithmetic"
+        ~: TestList
+            [ testEvalExpr "(+)" (eApp "+" []) (VNum 0)
+            , testEvalExpr "(+ 1 2)" (eApp "+" [eNum 1, eNum 2]) (VNum 3)
+            , testEvalExpr "(+ 1 2 3)" (eApp "+" [eNum 1, eNum 2, eNum 3]) (VNum 6)
+            , testEvalExpr "(- 5)" (eApp "-" [eNum 5]) (VNum (-5))
+            , testEvalExpr "(- 5 3)" (eApp "-" [eNum 5, eNum 3]) (VNum 2)
+            , testEvalExpr
+                "(- 10 3 2)"
+                (eApp "-" [eNum 10, eNum 3, eNum 2])
+                (VNum 5)
+            , testEvalExpr "(*)" (eApp "*" []) (VNum 1)
+            , testEvalExpr "(* 2 3)" (eApp "*" [eNum 2, eNum 3]) (VNum 6)
+            , testEvalExpr
+                "(* 2 3 4)"
+                (eApp "*" [eNum 2, eNum 3, eNum 4])
+                (VNum 24)
+            , testEvalExpr "(/ 10 2)" (eApp "/" [eNum 10, eNum 2]) (VNum 5)
+            , testEvalExpr "(/ 10 3)" (eApp "/" [eNum 10, eNum 3]) (VNum 3)
+            , -- R5RS quotient: truncation toward zero (distinct from Haskell `div`)
+              testEvalExpr "(/ -7 2)" (eApp "/" [eNum (-7), eNum 2]) (VNum (-3))
+            , testEvalExpr "(/ 7 -2)" (eApp "/" [eNum 7, eNum (-2)]) (VNum (-3))
+            , testEvalExpr "(/ -7 -2)" (eApp "/" [eNum (-7), eNum (-2)]) (VNum 3)
+            , -- Nested application
+              testEvalExpr
+                "(+ 1 (* 2 3))"
+                (eApp "+" [eNum 1, eApp "*" [eNum 2, eNum 3]])
+                (VNum 7)
+            , testEvalExpr
+                "(* (+ 1 2) (+ 3 4))"
+                (eApp "*" [eApp "+" [eNum 1, eNum 2], eApp "+" [eNum 3, eNum 4]])
+                (VNum 21)
+            , testEvalExprFailsWith
+                "(/ 10 0)"
+                (eApp "/" [eNum 10, eNum 0])
+                isDivisionByZero
+            , testEvalExprFailsWith "(-)" (eApp "-" []) isArityError
+            , testEvalExprFailsWith "(/ 1)" (eApp "/" [eNum 1]) isArityError
+            , testEvalExprFailsWith
+                "(+ 1 x)"
+                (eApp "+" [eNum 1, eVar "x"])
+                isUnboundVariable
+            , testEvalExprFailsWith
+                "(+ 1 #t)"
+                (eApp "+" [eNum 1, eBool True])
+                isTypeError
+            ]
+
+evaluatorCompare :: Test
+evaluatorCompare =
+    "Evaluator: comparisons and predicates"
+        ~: TestList
+            [ testEvalExpr "(= 1 1)" (eApp "=" [eNum 1, eNum 1]) (VBool True)
+            , testEvalExpr "(= 1 2)" (eApp "=" [eNum 1, eNum 2]) (VBool False)
+            , testEvalExpr "(< 1 2)" (eApp "<" [eNum 1, eNum 2]) (VBool True)
+            , testEvalExpr "(< 2 1)" (eApp "<" [eNum 2, eNum 1]) (VBool False)
+            , testEvalExpr "(<= 2 2)" (eApp "<=" [eNum 2, eNum 2]) (VBool True)
+            , testEvalExpr "(> 3 1)" (eApp ">" [eNum 3, eNum 1]) (VBool True)
+            , testEvalExpr "(>= 2 2)" (eApp ">=" [eNum 2, eNum 2]) (VBool True)
+            , testEvalExpr
+                "(number? 42)"
+                (eApp "number?" [eNum 42])
+                (VBool True)
+            , testEvalExpr
+                "(number? \"foo\")"
+                (eApp "number?" [eStr "foo"])
+                (VBool False)
+            , testEvalExpr "(number? ())" (eApp "number?" [eNil]) (VBool False)
+            , testEvalExprFailsWith
+                "(= 1 \"foo\")"
+                (eApp "=" [eNum 1, eStr "foo"])
+                isTypeError
+            , testEvalExprFailsWith "(< 1)" (eApp "<" [eNum 1]) isArityError
+            , testEvalExprFailsWith "(number?)" (eApp "number?" []) isArityError
+            ]
+
+evaluatorApply :: Test
+evaluatorApply =
+    "Evaluator: apply errors"
+        ~: TestList
+            [ -- Applying a non-procedure (integer)
+              testEvalExprFailsWith "(42)" (EApp (eNum 42) []) isNotAProcedure
+            , -- Applying a boolean
+              testEvalExprFailsWith
+                "(#t 1)"
+                (EApp (eBool True) [eNum 1])
+                isNotAProcedure
+            , -- Applying a string
+              testEvalExprFailsWith
+                "(\"foo\" 1)"
+                (EApp (eStr "foo") [eNum 1])
+                isNotAProcedure
+            , -- Unbound variable
+              testEvalExprFailsWith
+                "(undefined-var)"
+                (eApp "undefined-var" [])
+                isUnboundVariable
+            , -- Not-yet-implemented form (lambda)
+              testEvalExprFailsWith
+                "(lambda (x) x)"
+                (ELambda (Params [id' "x"] Nothing) (Body [] (eVar "x" :| [])))
+                isNotImplemented
+            ]
+
+-- * Interpreter integration tests (Text -> displayed result)
+
+-- | Assert that interpreting a Scheme source produces the expected display.
+testInterpret :: Text -> Text -> Test
+testInterpret input expected =
+    T.unpack input ~: TestCase $ do
+        result <- Interpreter.run input
+        case result of
+            Right actual -> assertEqual "" expected actual
+            Left err ->
+                assertFailure $
+                    "Expected "
+                        <> T.unpack expected
+                        <> ", got error: "
+                        <> T.unpack err
+
+interpreterIntegration :: Test
+interpreterIntegration =
+    "Interpreter: end-to-end"
+        ~: TestList
+            [ testInterpret "42" "42"
+            , testInterpret "(+ 1 2)" "3"
+            , testInterpret "(* (+ 1 2) (- 10 4))" "18"
+            , testInterpret "(< 1 2)" "#t"
+            , testInterpret "(number? 42)" "#t"
+            , -- String escape round-trip
+              testInterpret "\"hello\"" "\"hello\""
+            , testInterpret "\"a\\\"b\"" "\"a\\\"b\""
+            , testInterpret "\"line1\\nline2\"" "\"line1\\nline2\""
+            , testInterpret "\"tab\\there\"" "\"tab\\there\""
+            , testInterpret "\"back\\\\slash\"" "\"back\\\\slash\""
+            ]
+
 -- * Sample interpreter tests (kept from before)
 
 step0 :: Test
@@ -582,6 +839,11 @@ main = do
                 , analyzerLoad
                 , analyzerBody
                 , analyzerErrors
+                , evaluatorLiterals
+                , evaluatorArith
+                , evaluatorCompare
+                , evaluatorApply
+                , interpreterIntegration
                 , step0
                 , step1
                 ]

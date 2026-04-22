@@ -23,6 +23,10 @@
 # === Ignore hints incompatible with relude ===
 - ignore: {name: "Use isEOF"} # isEOF is not re-exported by relude; hIsEOF stdin is the correct form
 
+# === Scoped ignores ===
+# safeQuot is the single place that wraps the partial `quot` behind a Maybe guard.
+- ignore: {name: "Avoid partial function", within: [Scheme.Builtin.safeQuot]}
+
 # === Prefer Strict module variants ===
 - modules:
   - {name: Data.Map, message: "Use Data.Map.Strict instead"}
