@@ -2,15 +2,16 @@ module Main (main) where
 
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd)
-import Scheme.Parser (parseSExpr, prettyError)
+import Scheme.Interpreter (Env, initialEnv, runIn)
 
 main :: IO ()
 main = do
-    putTextLn "Mini-Scheme REPL (parser only)"
-    repl
+    putTextLn "Mini-Scheme REPL"
+    env <- initialEnv
+    repl env
 
-repl :: IO ()
-repl = do
+repl :: Env -> IO ()
+repl env = do
     putText "scheme> "
     hFlush stdout
     eof <- hIsEOF stdin
@@ -20,8 +21,9 @@ repl = do
             line <- getLine
             let input = toText . dropWhileEnd isSpace . dropWhile isSpace $ toString line
             unless (input == ":q") $ do
-                unless (input == "") $
-                    case parseSExpr input of
-                        Right sexpr -> print sexpr
-                        Left err -> putStrLn (prettyError err)
-                repl
+                unless (input == "") $ do
+                    result <- runIn env input
+                    case result of
+                        Right output -> putTextLn output
+                        Left err -> putTextLn err
+                repl env
