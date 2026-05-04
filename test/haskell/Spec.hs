@@ -14,7 +14,8 @@ import Scheme.AST (
     mkId,
  )
 import Scheme.Analyzer (analyze, analyzeToplevel)
-import Scheme.Evaluator (evaluate, initialEnv)
+import Scheme.Environment (initialEnv)
+import Scheme.Evaluator (evaluate)
 import Scheme.Interpreter qualified as Interpreter
 import Scheme.Parser (parseFile, parseSExpr)
 import Scheme.Runtime (
@@ -22,11 +23,10 @@ import Scheme.Runtime (
         ArityError,
         DivisionByZero,
         NotAProcedure,
-        NotImplemented,
         TypeError,
         UnboundVariable
     ),
-    Value (VBool, VNil, VNum, VStr),
+    Value (VBool, VNil, VNum, VStr, VSym, VUnspecified),
     atomicValueEq,
     prettyEvalError,
     runEval,
@@ -593,10 +593,6 @@ isDivisionByZero :: EvalError -> Bool
 isDivisionByZero DivisionByZero = True
 isDivisionByZero _ = False
 
-isNotImplemented :: EvalError -> Bool
-isNotImplemented NotImplemented{} = True
-isNotImplemented _ = False
-
 -- * AST-building helpers for readable evaluator tests
 
 eNum :: Integer -> Expr
@@ -731,11 +727,69 @@ evaluatorApply =
                 "(undefined-var)"
                 (eApp "undefined-var" [])
                 isUnboundVariable
-            , -- Not-yet-implemented form (lambda)
+            , -- Closure arity mismatch
               testEvalExprFailsWith
-                "(lambda (x) x)"
-                (ELambda (Params [id' "x"] Nothing) (Body [] (eVar "x" :| [])))
-                isNotImplemented
+                "((lambda (x y) x) 1)"
+                ( EApp
+                    (ELambda (Params [id' "x", id' "y"] Nothing) (Body [] (eVar "x" :| [])))
+                    [eNum 1]
+                )
+                isArityError
+            ]
+
+evaluatorSpecialForms :: Test
+evaluatorSpecialForms =
+    "Evaluator: special forms and closures"
+        ~: TestList
+            [ testEvalExpr "(quote x)" (EQuote (SSym "x")) (VSym "x")
+            , testEvalExpr "(if #t 1 2)" (EIf (eBool True) (eNum 1) (Just (eNum 2))) (VNum 1)
+            , testEvalExpr "(if #f 1 2)" (EIf (eBool False) (eNum 1) (Just (eNum 2))) (VNum 2)
+            , testEvalExpr "(if #f 1)" (EIf (eBool False) (eNum 1) Nothing) VUnspecified
+            , testEvalExpr "(begin 1 2 3)" (EBegin [eNum 1, eNum 2, eNum 3]) (VNum 3)
+            , testEvalExpr "(begin)" (EBegin []) VUnspecified
+            , testEvalExpr "(and)" (EAnd []) (VBool True)
+            , testEvalExpr "(and 1 2)" (EAnd [eNum 1, eNum 2]) (VNum 2)
+            , testEvalExpr "(and #f undefined)" (EAnd [eBool False, eVar "undefined"]) (VBool False)
+            , testEvalExpr "(or)" (EOr []) (VBool False)
+            , testEvalExpr "(or #f 2)" (EOr [eBool False, eNum 2]) (VNum 2)
+            , testEvalExpr "(or 1 undefined)" (EOr [eNum 1, eVar "undefined"]) (VNum 1)
+            , testEvalExpr
+                "((lambda (x) x) 42)"
+                (EApp (ELambda (Params [id' "x"] Nothing) (Body [] (eVar "x" :| []))) [eNum 42])
+                (VNum 42)
+            , testEvalExpr
+                "((lambda (x y) (+ x y)) 1 2)"
+                ( EApp
+                    ( ELambda
+                        (Params [id' "x", id' "y"] Nothing)
+                        (Body [] (eApp "+" [eVar "x", eVar "y"] :| []))
+                    )
+                    [eNum 1, eNum 2]
+                )
+                (VNum 3)
+            , testEvalExpr
+                "(let ((x 1) (y 2)) (+ x y))"
+                ( ELet
+                    Nothing
+                    [(id' "x", eNum 1), (id' "y", eNum 2)]
+                    (Body [] (eApp "+" [eVar "x", eVar "y"] :| []))
+                )
+                (VNum 3)
+            , testEvalExpr
+                "(let* ((x 1) (x (+ x 1))) x)"
+                ( ELetStar
+                    [(id' "x", eNum 1), (id' "x", eApp "+" [eVar "x", eNum 1])]
+                    (Body [] (eVar "x" :| []))
+                )
+                (VNum 2)
+            , testEvalExpr
+                "(let ((x 1)) (set! x 2) x)"
+                ( ELet
+                    Nothing
+                    [(id' "x", eNum 1)]
+                    (Body [] (ESet (id' "x") (eNum 2) :| [eVar "x"]))
+                )
+                (VNum 2)
             ]
 
 -- * Interpreter integration tests (Text -> displayed result)
@@ -754,6 +808,22 @@ testInterpret input expected =
                         <> ", got error: "
                         <> T.unpack err
 
+-- | Assert that interpreting a Scheme source produces an error.
+testInterpretError :: Text -> Text -> Test
+testInterpretError input expectedNeedle =
+    (T.unpack input <> " => ERROR") ~: TestCase $ do
+        result <- Interpreter.run input
+        case result of
+            Left err
+                | expectedNeedle `T.isInfixOf` err -> pure ()
+                | otherwise ->
+                    assertFailure $
+                        "Expected error containing "
+                            <> T.unpack expectedNeedle
+                            <> ", got: "
+                            <> T.unpack err
+            Right actual -> assertFailure $ "Expected error, got: " <> T.unpack actual
+
 interpreterIntegration :: Test
 interpreterIntegration =
     "Interpreter: end-to-end"
@@ -769,6 +839,82 @@ interpreterIntegration =
             , testInterpret "\"line1\\nline2\"" "\"line1\\nline2\""
             , testInterpret "\"tab\\there\"" "\"tab\\there\""
             , testInterpret "\"back\\\\slash\"" "\"back\\\\slash\""
+            , testInterpret "(if #f 1)" "(unspecified)"
+            , testInterpret "(cond (#f 1) (#t 2))" "2"
+            , testInterpret "(cond (#f 1) (else 3))" "3"
+            , testInterpret "(and 1 2 \"hello\")" "\"hello\""
+            , testInterpret "(or #f #f 3)" "3"
+            , testInterpret "(begin 1 2 3)" "3"
+            , testInterpret "'x" "x"
+            , testInterpret "'(1 2 3)" "(1 2 3)"
+            , testInterpret "'(a . b)" "(a . b)"
+            , testInterpret "((lambda (x) x) 42)" "42"
+            , testInterpret "((lambda (x y) (+ x y)) 1 2)" "3"
+            , testInterpret "((lambda args args) 1 2 3)" "(1 2 3)"
+            , testInterpret "((lambda (x y . rest) rest) 1 2 3 4)" "(3 4)"
+            , testInterpret "(let ((x 1) (y 2)) (+ x y))" "3"
+            , testInterpret "(let* ((x 1) (x (+ x 1))) x)" "2"
+            , testInterpret "(let* ((x 1) (f (lambda () x)) (x 2)) (f))" "1"
+            , testInterpret "(letrec ((fact (lambda (n) (if (= n 0) 1 (* n (fact (- n 1))))))) (fact 5))" "120"
+            , testInterpret "(let loop ((n 3)) (if (= n 0) 'done (loop (- n 1))))" "done"
+            , testInterpret "(do ((i 0 (+ i 1))) ((= i 3) i) #f)" "3"
+            , testInterpret "(let ((f #f)) (do ((i 0 (+ i 1))) ((= i 1) (f)) (set! f (lambda () i))))" "0"
+            , testInterpret "(let ((x 1)) (set! x 2) x)" "2"
+            , testInterpretError "(let ((x 1) (y x)) y)" "unbound variable"
+            ]
+
+-- | Test that 'runIn' carries environment updates across calls.
+interpreterRunIn :: Test
+interpreterRunIn =
+    "Interpreter.runIn: persistent env"
+        ~: TestList
+            [ "successive calls with the same env both succeed"
+                ~: TestCase
+                $ do
+                    env <- Interpreter.initialEnv
+                    r1 <- Interpreter.runIn env "(+ 1 2)"
+                    r2 <- Interpreter.runIn env "(* 3 4)"
+                    case (r1, r2) of
+                        (Right "3", Right "12") -> pure ()
+                        _ ->
+                            assertFailure $
+                                "Expected (Right \"3\", Right \"12\"), got: "
+                                    <> show (r1, r2)
+            , "top-level define persists a variable"
+                ~: TestCase
+                $ do
+                    env <- Interpreter.initialEnv
+                    r1 <- Interpreter.runIn env "(define x 1)"
+                    r2 <- Interpreter.runIn env "x"
+                    assertEqual "" (Right "(unspecified)", Right "1") (r1, r2)
+            , "top-level function define captures the shared env"
+                ~: TestCase
+                $ do
+                    env <- Interpreter.initialEnv
+                    r1 <- Interpreter.runIn env "(define (double x) (* x 2))"
+                    r2 <- Interpreter.runIn env "(double 5)"
+                    assertEqual "" (Right "(unspecified)", Right "10") (r1, r2)
+            , "set! persists through the shared env"
+                ~: TestCase
+                $ do
+                    env <- Interpreter.initialEnv
+                    r1 <- Interpreter.runIn env "(define n 0)"
+                    r2 <- Interpreter.runIn env "(set! n 2)"
+                    r3 <- Interpreter.runIn env "n"
+                    assertEqual "" (Right "(unspecified)", Right "(unspecified)", Right "2") (r1, r2, r3)
+            , "top-level load remains NotImplemented"
+                ~: TestCase
+                $ do
+                    env <- Interpreter.initialEnv
+                    result <- Interpreter.runIn env "(load \"foo.scm\")"
+                    case result of
+                        Left err
+                            | "not yet implemented" `T.isInfixOf` err -> pure ()
+                            | otherwise ->
+                                assertFailure $
+                                    "Expected 'not yet implemented' error, got: " <> T.unpack err
+                        Right v ->
+                            assertFailure $ "Expected error, got: " <> T.unpack v
             ]
 
 -- * Sample interpreter tests (kept from before)
@@ -843,7 +989,9 @@ main = do
                 , evaluatorArith
                 , evaluatorCompare
                 , evaluatorApply
+                , evaluatorSpecialForms
                 , interpreterIntegration
+                , interpreterRunIn
                 , step0
                 , step1
                 ]

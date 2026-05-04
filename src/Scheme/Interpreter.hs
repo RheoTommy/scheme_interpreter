@@ -7,11 +7,14 @@ stay focused on @Expr -> Value@ and avoid a dependency on the parser.
 Two entry points are provided:
 
   * 'runIn' takes an explicit 'Env' and is suitable for an interactive
-    REPL or any caller that wants to accumulate state across evaluations.
-    The environment is mutated in place via 'IORef'; the same 'Env'
-    reference keeps observing later updates.
+    REPL or any caller that wants state to accumulate across evaluations.
+    The environment is shared by reference; later updates from prior
+    calls remain visible.
   * 'run' is a convenience wrapper that creates a fresh environment for
     a single evaluation, suitable for tests and one-shot scripts.
+
+Each call evaluates exactly one top-level form. Multi-form input is the
+caller's responsibility (see 'Scheme.Parser.parseFile').
 -}
 module Scheme.Interpreter (
     Env,
@@ -22,9 +25,16 @@ module Scheme.Interpreter (
 
 import Scheme.AST (Toplevel (TDefine, TExpr, TLoad))
 import Scheme.Analyzer (AnalyzeError (AnalyzeError), analyzeToplevel)
-import Scheme.Evaluator (evaluate, initialEnv)
+import Scheme.Environment (initialEnv)
+import Scheme.Evaluator (evaluate, evaluateDefine)
 import Scheme.Parser (parseSExpr, prettyError)
-import Scheme.Runtime (Env, prettyEvalError, runEval, showValue)
+import Scheme.Runtime (
+    Env,
+    EvalError (NotImplemented),
+    prettyEvalError,
+    runEval,
+    showValueIO,
+ )
 
 {- | Parse, analyze, and evaluate a single top-level form in the given
 environment.
@@ -39,11 +49,17 @@ runIn env input = case parseSExpr input of
         Left (AnalyzeError msg) -> pure $ Left ("analyze error: " <> msg)
         Right (TExpr expr) -> do
             result <- runEval env (evaluate expr)
-            pure $ case result of
-                Left err -> Left ("eval error: " <> prettyEvalError err)
-                Right v -> Right (showValue v)
-        Right TDefine{} -> pure $ Left "top-level define: not yet implemented"
-        Right TLoad{} -> pure $ Left "load: not yet implemented"
+            formatEvalResult result
+        Right (TDefine define) -> do
+            result <- runEval env (evaluateDefine define)
+            formatEvalResult result
+        Right TLoad{} -> pure $ Left (notImplementedMsg "load")
+  where
+    formatEvalResult result = case result of
+        Left err -> pure $ Left ("eval error: " <> prettyEvalError err)
+        Right v -> Right <$> showValueIO v
+
+    notImplementedMsg form = "eval error: " <> prettyEvalError (NotImplemented form)
 
 {- | Convenience wrapper: parse, analyze, and evaluate a single top-level
 form in a fresh environment. Equivalent to @initialEnv >>= flip runIn input@.

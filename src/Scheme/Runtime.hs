@@ -11,8 +11,9 @@ and 'VClosure', while 'Eval' carries 'Env' which carries 'Value'.
 -}
 module Scheme.Runtime (
     -- * Values
-    Value (VNum, VBool, VStr, VSym, VNil, VPair, VClosure, VBuiltin),
+    Value (VNum, VBool, VStr, VSym, VNil, VUnspecified, VPair, VClosure, VBuiltin),
     showValue,
+    showValueIO,
     showValueKind,
     atomicValueEq,
 
@@ -20,8 +21,13 @@ module Scheme.Runtime (
     Env,
     Frame,
     newFrame,
+    newChildFrame,
     bindInFrame,
+    bindUninitializedInFrame,
+    defineVar,
+    defineUninitializedVar,
     lookupVar,
+    setVar,
 
     -- * Errors
     EvalError (
@@ -57,12 +63,16 @@ data Value
     | VStr Text
     | VSym Text
     | VNil
+    | -- | The result of forms whose value is intentionally unspecified.
+      VUnspecified
     | -- | Mutable pair (enables @set-car!@ and @set-cdr!@).
       VPair (IORef Value) (IORef Value)
     | -- | Closure: formal params, body, captured environment.
       VClosure Params Body Env
     | -- | Builtin procedure. The name is retained for display and error messages.
       VBuiltin Text ([Value] -> Eval Value)
+    | -- | Placeholder used while evaluating recursive bindings.
+      VUninitialized Text
 
 {- | Approximate display of a value. Does not traverse pairs (that would
 require 'IO'); a richer printer can be layered on top.
@@ -75,9 +85,37 @@ showValue v = case v of
     VStr s -> "\"" <> escapeSchemeString s <> "\""
     VSym s -> s
     VNil -> "()"
+    VUnspecified -> "(unspecified)"
     VPair{} -> "<pair>"
     VClosure{} -> "<closure>"
     VBuiltin name _ -> "<builtin: " <> name <> ">"
+    VUninitialized name -> "<uninitialized: " <> name <> ">"
+
+-- | Display a value, traversing pairs in 'IO'.
+showValueIO :: Value -> IO Text
+showValueIO v = case v of
+    VPair carRef cdrRef -> showPair carRef cdrRef
+    _ -> pure (showValue v)
+  where
+    showPair :: IORef Value -> IORef Value -> IO Text
+    showPair carRef cdrRef = do
+        car <- readIORef carRef
+        cdr <- readIORef cdrRef
+        carText <- showValueIO car
+        cdrText <- showPairTail cdr
+        pure $ "(" <> carText <> cdrText <> ")"
+
+    showPairTail :: Value -> IO Text
+    showPairTail VNil = pure ""
+    showPairTail (VPair carRef cdrRef) = do
+        car <- readIORef carRef
+        cdr <- readIORef cdrRef
+        carText <- showValueIO car
+        cdrText <- showPairTail cdr
+        pure $ " " <> carText <> cdrText
+    showPairTail other = do
+        otherText <- showValueIO other
+        pure $ " . " <> otherText
 
 -- | Escape Scheme string metacharacters for round-trippable output.
 escapeSchemeString :: Text -> Text
@@ -104,6 +142,7 @@ atomicValueEq (VBool a) (VBool b) = a == b
 atomicValueEq (VStr a) (VStr b) = a == b
 atomicValueEq (VSym a) (VSym b) = a == b
 atomicValueEq VNil VNil = True
+atomicValueEq VUnspecified VUnspecified = True
 atomicValueEq _ _ = False
 
 -- | Describe the "kind" of a value, for use in error messages.
@@ -114,9 +153,11 @@ showValueKind v = case v of
     VStr _ -> "string"
     VSym _ -> "symbol"
     VNil -> "nil"
+    VUnspecified -> "unspecified"
     VPair{} -> "pair"
     VClosure{} -> "closure"
     VBuiltin{} -> "builtin"
+    VUninitialized{} -> "uninitialized"
 
 -- * Environment
 
@@ -141,29 +182,65 @@ newFrame = do
     ref <- newIORef Map.empty
     pure $ Frame{parent = Nothing, bindings = ref}
 
+-- | Create a child frame with the given lexical parent.
+newChildFrame :: Frame -> IO Frame
+newChildFrame parentFrame = do
+    ref <- newIORef Map.empty
+    pure $ Frame{parent = Just parentFrame, bindings = ref}
+
 -- | Insert or overwrite a binding in the given frame.
 bindInFrame :: Id -> Value -> Frame -> IO ()
 bindInFrame ident val frame = do
     ref <- newIORef val
     modifyIORef' (bindings frame) (Map.insert ident ref)
 
+-- | Insert an uninitialized binding in the given frame.
+bindUninitializedInFrame :: Id -> Frame -> IO ()
+bindUninitializedInFrame ident =
+    bindInFrame ident (VUninitialized (idToText ident))
+
+-- | Define or overwrite a binding in the current frame.
+defineVar :: Id -> Value -> Eval ()
+defineVar ident val = do
+    env <- ask
+    liftIO $ bindInFrame ident val env
+
+-- | Define or overwrite an uninitialized binding in the current frame.
+defineUninitializedVar :: Id -> Eval ()
+defineUninitializedVar ident = do
+    env <- ask
+    liftIO $ bindUninitializedInFrame ident env
+
 -- | Look up a variable, walking up the parent chain.
 lookupVar :: Id -> Eval Value
 lookupVar ident = do
     env <- ask
-    mref <- liftIO (findRef env)
+    mref <- liftIO (findRef ident env)
     case mref of
-        Just ref -> readIORef ref
+        Just ref -> do
+            value <- readIORef ref
+            case value of
+                VUninitialized name -> throwError $ OtherEvalError ("uninitialized variable: " <> name)
+                _ -> pure value
         Nothing -> throwError $ UnboundVariable (idToText ident)
-  where
-    findRef :: Frame -> IO (Maybe (IORef Value))
-    findRef f = do
-        m <- readIORef (bindings f)
-        case Map.lookup ident m of
-            Just r -> pure (Just r)
-            Nothing -> case parent f of
-                Just p -> findRef p
-                Nothing -> pure Nothing
+
+-- | Update an existing binding, walking up the parent chain.
+setVar :: Id -> Value -> Eval ()
+setVar ident val = do
+    env <- ask
+    mref <- liftIO (findRef ident env)
+    case mref of
+        Just ref -> liftIO $ writeIORef ref val
+        Nothing -> throwError $ UnboundVariable (idToText ident)
+
+findRef :: Id -> Frame -> IO (Maybe (IORef Value))
+findRef ident frame = do
+    m <- readIORef (bindings frame)
+    case Map.lookup ident m of
+        Just r -> pure (Just r)
+        Nothing -> case parent frame of
+            Just p -> findRef ident p
+            Nothing -> pure Nothing
 
 -- * Errors
 

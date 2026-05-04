@@ -29,6 +29,7 @@ library
                     , Scheme.Parser
                     , Scheme.Runtime
                     , Scheme.Builtin
+                    , Scheme.Environment
                     , Scheme.Evaluator
                     , Scheme.Interpreter
                     , Sample.Types
