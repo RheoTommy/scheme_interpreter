@@ -52,6 +52,7 @@ executable scheme-interpreter
     build-depends:    base >=4.20 && <5
                     , scheme-interpreter
                     , relude ^>=1.2
+                    , text
     mixins:           base hiding (Prelude)
                     , relude (Relude as Prelude)
     hs-source-dirs:   app

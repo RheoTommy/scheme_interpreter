@@ -1,7 +1,6 @@
 module Main (main) where
 
-import Data.Char (isSpace)
-import Data.List (dropWhileEnd)
+import Data.Text qualified as T
 import Scheme.Interpreter (Env, initialEnv, runIn)
 
 main :: IO ()
@@ -19,9 +18,9 @@ repl env = do
         then putTextLn ""
         else do
             line <- getLine
-            let input = toText . dropWhileEnd isSpace . dropWhile isSpace $ toString line
+            let input = T.strip line
             unless (input == ":q") $ do
-                unless (input == "") $ do
+                unless (T.null input) $ do
                     result <- runIn env input
                     case result of
                         Right output -> putTextLn output
