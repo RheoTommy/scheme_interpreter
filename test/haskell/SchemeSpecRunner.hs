@@ -3,6 +3,7 @@ module SchemeSpecRunner (
     optionSpecSyntaxSuite,
     parseErrorSpecSuite,
     r5rsSpecSuite,
+    tcoSpecSuite,
 ) where
 
 import Control.Exception (IOException, bracket, try)
@@ -77,6 +78,11 @@ r5rsSpecSuite =
                 ~: TestCase runR5RSDifferential
             ]
 
+tcoSpecSuite :: Test
+tcoSpecSuite =
+    "Mini-Scheme TCO specs"
+        ~: TestList (specFileTest <$> tcoSpecFiles)
+
 coreSpecFiles :: [FilePath]
 coreSpecFiles =
     [ "test/spec/core/step0-parse-literals.scm"
@@ -97,6 +103,11 @@ optionSpecFiles =
     , "test/spec/options/step9-macros.scm"
     , "test/spec/options/step11-next-target-programs.scm"
     , "test/spec/options/manual-stress-programs.scm"
+    ]
+
+tcoSpecFiles :: [FilePath]
+tcoSpecFiles =
+    [ "test/spec/options/step8-tco.scm"
     ]
 
 parseErrorSpecFiles :: [FilePath]

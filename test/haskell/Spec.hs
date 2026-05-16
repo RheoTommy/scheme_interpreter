@@ -33,7 +33,7 @@ import Scheme.Runtime (
     showValue,
  )
 import Scheme.SExpr (SExpr (SBool, SNil, SNum, SPair, SStr, SSym))
-import SchemeSpecRunner (coreSpecSuite, optionSpecSyntaxSuite, parseErrorSpecSuite, r5rsSpecSuite)
+import SchemeSpecRunner (coreSpecSuite, optionSpecSyntaxSuite, parseErrorSpecSuite, r5rsSpecSuite, tcoSpecSuite)
 import Test.HUnit (
     Counts (errors, failures),
     Test (TestCase, TestList),
@@ -857,6 +857,7 @@ main = do
                 , interpreterRunIn
                 , coreSpecSuite
                 , optionSpecSyntaxSuite
+                , tcoSpecSuite
                 , parseErrorSpecSuite
                 , r5rsSpecSuite
                 ]
