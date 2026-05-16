@@ -16,6 +16,9 @@ module Scheme.Runtime (
     showValueIO,
     showValueKind,
     atomicValueEq,
+    PairCell,
+    pairSeen,
+    samePair,
 
     -- * Environment
     Env,
@@ -93,29 +96,51 @@ showValue v = case v of
 
 -- | Display a value, traversing pairs in 'IO'.
 showValueIO :: Value -> IO Text
-showValueIO v = case v of
-    VPair carRef cdrRef -> showPair carRef cdrRef
-    _ -> pure (showValue v)
+showValueIO = showValueWith []
   where
-    showPair :: IORef Value -> IORef Value -> IO Text
-    showPair carRef cdrRef = do
+    showValueWith :: [PairCell] -> Value -> IO Text
+    showValueWith seen v = case v of
+        VPair carRef cdrRef ->
+            let pair = (carRef, cdrRef)
+             in if pairSeen pair seen
+                    then pure "#<cycle>"
+                    else showPair (pair : seen) carRef cdrRef
+        _ -> pure (showValue v)
+
+    showPair :: [PairCell] -> IORef Value -> IORef Value -> IO Text
+    showPair seen carRef cdrRef = do
         car <- readIORef carRef
         cdr <- readIORef cdrRef
-        carText <- showValueIO car
-        cdrText <- showPairTail cdr
+        carText <- showValueWith seen car
+        cdrText <- showPairTail seen cdr
         pure $ "(" <> carText <> cdrText <> ")"
 
-    showPairTail :: Value -> IO Text
-    showPairTail VNil = pure ""
-    showPairTail (VPair carRef cdrRef) = do
+    showPairTail :: [PairCell] -> Value -> IO Text
+    showPairTail _ VNil = pure ""
+    showPairTail seen (VPair carRef cdrRef) =
+        let pair = (carRef, cdrRef)
+         in if pairSeen pair seen
+                then pure " . #<cycle>"
+                else showPairTailPair (pair : seen) carRef cdrRef
+    showPairTail seen other = do
+        otherText <- showValueWith seen other
+        pure $ " . " <> otherText
+
+    showPairTailPair :: [PairCell] -> IORef Value -> IORef Value -> IO Text
+    showPairTailPair seen carRef cdrRef = do
         car <- readIORef carRef
         cdr <- readIORef cdrRef
-        carText <- showValueIO car
-        cdrText <- showPairTail cdr
+        carText <- showValueWith seen car
+        cdrText <- showPairTail seen cdr
         pure $ " " <> carText <> cdrText
-    showPairTail other = do
-        otherText <- showValueIO other
-        pure $ " . " <> otherText
+
+type PairCell = (IORef Value, IORef Value)
+
+pairSeen :: PairCell -> [PairCell] -> Bool
+pairSeen pair = any (samePair pair)
+
+samePair :: PairCell -> PairCell -> Bool
+samePair (carA, cdrA) (carB, cdrB) = carA == carB && cdrA == cdrB
 
 -- | Escape Scheme string metacharacters for round-trippable output.
 escapeSchemeString :: Text -> Text

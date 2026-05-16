@@ -8,7 +8,7 @@ module Scheme.Environment (
     initialEnv,
 ) where
 
-import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Scheme.AST (mkId)
 import Scheme.Builtin (builtins)
 import Scheme.Runtime (Env, bindInFrame, newFrame)
@@ -17,9 +17,21 @@ import Scheme.Runtime (Env, bindInFrame, newFrame)
 initialEnv :: IO Env
 initialEnv = do
     frame <- newFrame
-    for_ (Map.toList builtins) $ \(name, value) -> case mkId name of
+    case duplicateBuiltinName builtins of
+        Just name -> fail $ "initialEnv: duplicate builtin name: " <> toString name
+        Nothing -> pure ()
+    for_ builtins $ \(name, value) -> case mkId name of
         Just ident -> bindInFrame ident value frame
         -- Builtin names are static and known-valid identifiers; an empty
         -- name here indicates a programming error in 'Scheme.Builtin'.
         Nothing -> fail $ "initialEnv: invalid builtin name: " <> toString name
     pure frame
+
+duplicateBuiltinName :: [(Text, a)] -> Maybe Text
+duplicateBuiltinName = go Set.empty
+  where
+    go :: Set.Set Text -> [(Text, a)] -> Maybe Text
+    go _ [] = Nothing
+    go seen ((name, _) : rest)
+        | name `Set.member` seen = Just name
+        | otherwise = go (Set.insert name seen) rest

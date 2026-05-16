@@ -848,6 +848,32 @@ interpreterIntegration =
             , testInterpret "'x" "x"
             , testInterpret "'(1 2 3)" "(1 2 3)"
             , testInterpret "'(a . b)" "(a . b)"
+            , testInterpret "(cons 1 2)" "(1 . 2)"
+            , testInterpret "(list 1 (+ 1 1) 3)" "(1 2 3)"
+            , testInterpret "(append '(1 2) '(3 4))" "(1 2 3 4)"
+            , testInterpretError "(append (cons 1 2))" "proper list"
+            , testInterpretError "(append '(1) (cons 2 3))" "proper list"
+            , testInterpret "(length '(1 2 3))" "3"
+            , testInterpret "(last '(1 2 3))" "3"
+            , testInterpret "(memq 'b '(a b c))" "(b c)"
+            , testInterpret "(null? '())" "#t"
+            , testInterpret "(pair? '(1 2))" "#t"
+            , testInterpret "(list? (cons 1 2))" "#f"
+            , testInterpret "(symbol? 'x)" "#t"
+            , testInterpret "(boolean? #f)" "#t"
+            , testInterpret "(string? \"hi\")" "#t"
+            , testInterpret "(procedure? car)" "#t"
+            , testInterpret "(not #f)" "#t"
+            , testInterpret "(string-append \"hello\" \" \" \"world\")" "\"hello world\""
+            , testInterpret "(symbol->string 'hello)" "\"hello\""
+            , testInterpret "(string->symbol \"hello\")" "hello"
+            , testInterpret "(string->number \"42\")" "42"
+            , testInterpret "(number->string -42)" "\"-42\""
+            , testInterpret "(eq? 'a 'a)" "#t"
+            , testInterpret "(neq? 'a 'a)" "#f"
+            , testInterpret "(equal? '(1 (2 3)) '(1 (2 3)))" "#t"
+            , testInterpretError "(car '())" "type error"
+            , testInterpretError "(length (cons 1 2))" "type error"
             , testInterpret "((lambda (x) x) 42)" "42"
             , testInterpret "((lambda (x y) (+ x y)) 1 2)" "3"
             , testInterpret "((lambda args args) 1 2 3)" "(1 2 3)"
@@ -902,6 +928,15 @@ interpreterRunIn =
                     r2 <- Interpreter.runIn env "(set! n 2)"
                     r3 <- Interpreter.runIn env "n"
                     assertEqual "" (Right "(unspecified)", Right "(unspecified)", Right "2") (r1, r2, r3)
+            , "pair mutation persists through the shared env"
+                ~: TestCase
+                $ do
+                    env <- Interpreter.initialEnv
+                    r1 <- Interpreter.runIn env "(define p (list 1 2 3))"
+                    r2 <- Interpreter.runIn env "(set-car! p 10)"
+                    r3 <- Interpreter.runIn env "(set-cdr! p '())"
+                    r4 <- Interpreter.runIn env "p"
+                    assertEqual "" (Right "(unspecified)", Right "(unspecified)", Right "(unspecified)", Right "(10)") (r1, r2, r3, r4)
             , "top-level load remains NotImplemented"
                 ~: TestCase
                 $ do
