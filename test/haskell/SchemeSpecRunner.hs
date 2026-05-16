@@ -1,5 +1,6 @@
 module SchemeSpecRunner (
     coreSpecSuite,
+    optionSpecSyntaxSuite,
     parseErrorSpecSuite,
     r5rsSpecSuite,
 ) where
@@ -9,7 +10,7 @@ import Control.Monad (foldM)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Scheme.Interpreter qualified as Interpreter
-import Scheme.Parser (parseFile)
+import Scheme.Parser (parseFile, prettyError)
 import System.Directory (findExecutable, getTemporaryDirectory, removeFile)
 import System.Environment qualified as Environment
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
@@ -56,6 +57,11 @@ coreSpecSuite =
     "Mini-Scheme executable specs"
         ~: TestList (specFileTest <$> coreSpecFiles)
 
+optionSpecSyntaxSuite :: Test
+optionSpecSyntaxSuite =
+    "Mini-Scheme option spec syntax"
+        ~: TestList (parseableSpecFileTest <$> optionSpecFiles)
+
 parseErrorSpecSuite :: Test
 parseErrorSpecSuite =
     "Mini-Scheme parse error specs"
@@ -82,6 +88,15 @@ coreSpecFiles =
     , "test/spec/core/step6-string-eq-misc.scm"
     , "test/spec/core/step7-errors.scm"
     , "test/spec/core/step10-integration.scm"
+    , "test/spec/core/step11-target-regressions.scm"
+    ]
+
+optionSpecFiles :: [FilePath]
+optionSpecFiles =
+    [ "test/spec/options/step8-tco.scm"
+    , "test/spec/options/step9-macros.scm"
+    , "test/spec/options/step11-next-target-programs.scm"
+    , "test/spec/options/manual-stress-programs.scm"
     ]
 
 parseErrorSpecFiles :: [FilePath]
@@ -99,6 +114,16 @@ r5rsPortableSpecFiles =
 specFileTest :: FilePath -> Test
 specFileTest path =
     path ~: TestCase (runSpecFile path)
+
+parseableSpecFileTest :: FilePath -> Test
+parseableSpecFileTest path =
+    path ~: TestCase $ do
+        input <- TIO.readFile path
+        case parseFile path input of
+            Left err ->
+                assertFailure $
+                    path <> ": expected parseable option spec, got " <> prettyError err
+            Right _ -> pure ()
 
 parseErrorSpecTest :: FilePath -> Test
 parseErrorSpecTest path =

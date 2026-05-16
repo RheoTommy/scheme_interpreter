@@ -27,8 +27,10 @@
 
 - `options/*.scm`
   - Optional features such as TCO and macros.
-  - These files document the intended behavior but are not part of the default
-    required test suite yet.
+  - These files document the intended behavior but are not evaluated as part of
+    the default required test suite yet.
+  - `cabal test` still checks that these files are parseable Mini-Scheme
+    S-expression sources, so future target programs do not silently rot.
 
 ## Expectation Syntax
 
