@@ -54,6 +54,8 @@
 (append)                          ;; => ()
 (append '(1 2))                   ;; => (1 2)
 (append '() '())                  ;; => ()
+(append (cons 1 2))               ;; => ERROR contains "proper list"
+(append '(1) (cons 2 3))          ;; => ERROR contains "proper list"
 
 ;; === last ===
 (last '(1 2 3))         ;; => 3
@@ -81,6 +83,17 @@ q                       ;; => (10 2 3)
 (define r (list 1 2 3))
 (set-cdr! r '())
 r                       ;; => (1)
+
+;; Circular pairs should not make list walkers or output formatting loop forever.
+(define circular (list 1))
+(set-cdr! circular circular)
+(list? circular)        ;; => #f
+circular                ;; => (1 . #<cycle>)
+(length circular)       ;; => ERROR contains "proper list"
+(append circular '(2))  ;; => ERROR contains "proper list"
+(last circular)         ;; => ERROR contains "proper list"
+(memq 2 circular)       ;; => ERROR contains "proper list"
+(equal? circular circular) ;; => #t
 
 ;; set-car!/set-cdr! on non-pair should error
 ;; (set-car! 1 2)       ;; => ERROR

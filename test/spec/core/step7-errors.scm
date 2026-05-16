@@ -4,10 +4,8 @@
 ;;; Each expression below should produce an error message,
 ;;; and the REPL should continue to accept input afterwards.
 
-;; === Parse errors ===
-(                       ;; => ERROR: unexpected end of input
-())(                    ;; => ERROR: unexpected token
-"unterminated           ;; => ERROR: unterminated string
+;; Parse errors live under test/spec/errors because each malformed
+;; source fragment must be parsed independently.
 
 ;; === Unbound variable ===
 undefined-var           ;; => ERROR: unbound variable

@@ -66,4 +66,5 @@
 
 ;; do (inherently iterative)
 (do ((i 0 (+ i 1)))
-    ((= i 1000000) 'done))          ;; => done
+    ((= i 1000000) 'done)
+  #f)                               ;; => done

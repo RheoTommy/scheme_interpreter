@@ -99,6 +99,11 @@ y               ;; => 3
   (+ x a b c))
 (multi-def 10)  ;; => 16
 
+((lambda ()
+  (define x 1)
+  (define y x)
+  y))            ;; => ERROR contains "uninitialized variable: x"
+
 ;; Body with multiple expressions (returns last)
 (define (multi-expr)
   (define x 1)

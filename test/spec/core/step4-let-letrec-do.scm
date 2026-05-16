@@ -49,7 +49,7 @@ let-mut                             ;; => 10
 (let* () 1)                         ;; => 1
 (let* ((x 1)) x)                   ;; => 1
 (let* ((x 1) (y (+ x 1))) y)      ;; => 2
-(let* ((x 1) (y (+ x 1)) (z (+ x y))) z) ;; => 4
+(let* ((x 1) (y (+ x 1)) (z (+ x y))) z) ;; => 3
 
 ;; let* shadowing: same name can be rebound
 (let* ((x 1) (x (+ x 1))) x)      ;; => 2
@@ -57,6 +57,7 @@ let-mut                             ;; => 10
 ;; === letrec ===
 (letrec ((x 1)) x)                 ;; => 1
 (letrec () 1)                      ;; => 1
+(letrec ((x 1) (y x)) y)           ;; => ERROR contains "uninitialized variable: x"
 
 ;; letrec for mutually recursive local functions
 (letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1)))))

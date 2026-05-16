@@ -12,7 +12,7 @@
 ;; Note: In Scheme, only #f is falsy. 0, "", '() are all truthy.
 
 ;; if with no else, condition false (unspecified return)
-(if #f 1)           ;; => (unspecified, e.g. () or void)
+(if #f 1)           ;; => (unspecified)
 
 ;; === cond ===
 (cond (#t 1))                    ;; => 1
@@ -75,8 +75,8 @@ or-test             ;; => 0
 (define seq-test 0)
 (begin (set! seq-test 1) (set! seq-test 2) seq-test) ;; => 2
 
-;; begin with define
-(begin (define begin-var 42) begin-var)  ;; => 42
+;; In Mini-Scheme, begin contains Exp* rather than Body, so internal
+;; define is tested under lambda/let/do bodies instead of begin.
 
 ;; === quote ===
 (quote x)           ;; => x
