@@ -11,6 +11,12 @@
 (car (cdr '(1 2 3)))    ;; => 2
 (cdr (cdr '(1 2 3)))    ;; => (3)
 (cdr '(1))              ;; => ()
+(caar '((1 2) 3))       ;; => 1
+(cadr '(1 2 3))         ;; => 2
+(cdar '((1 2) 3))       ;; => (2)
+(cddr '(1 2 3))         ;; => (3)
+(caddr '(1 2 3))        ;; => 3
+(cadddr '(1 2 3 4))     ;; => 4
 
 ;; car/cdr on empty list should error
 ;; (car '())             ;; => ERROR
@@ -38,6 +44,9 @@
 (symbol? 1)             ;; => #f
 (symbol? "x")           ;; => #f
 (symbol? '())           ;; => #f
+(procedure? display)    ;; => #t
+(procedure? newline)    ;; => #t
+(procedure? print)      ;; => #t
 
 ;; === length ===
 (length '())            ;; => 0

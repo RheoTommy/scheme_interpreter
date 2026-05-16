@@ -9,8 +9,10 @@ proper-list utilities, equality, and basic string/symbol conversions.
 -}
 module Scheme.Builtin (builtins) where
 
+import Control.Monad (foldM)
 import Control.Monad.Except (throwError)
 import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
 import Scheme.Runtime (
     Eval,
     EvalError (ArityError, DivisionByZero, OtherEvalError, TypeError),
@@ -18,6 +20,7 @@ import Scheme.Runtime (
     Value (VBool, VBuiltin, VClosure, VNil, VNum, VPair, VStr, VSym, VUnspecified),
     pairSeen,
     samePair,
+    showValueIO,
     showValueKind,
  )
 
@@ -45,22 +48,27 @@ builtins =
     , mkBuiltin "cons" builtinCons
     , mkBuiltin "car" builtinCar
     , mkBuiltin "cdr" builtinCdr
-    , mkBuiltin "list" builtinList
-    , mkBuiltin "length" builtinLength
-    , mkBuiltin "append" builtinAppend
-    , mkBuiltin "last" builtinLast
-    , mkBuiltin "memq" builtinMemq
-    , mkBuiltin "set-car!" builtinSetCar
-    , mkBuiltin "set-cdr!" builtinSetCdr
-    , mkBuiltin "string-append" builtinStringAppend
-    , mkBuiltin "symbol->string" builtinSymbolToString
-    , mkBuiltin "string->symbol" builtinStringToSymbol
-    , mkBuiltin "string->number" builtinStringToNumber
-    , mkBuiltin "number->string" builtinNumberToString
-    , mkBuiltin "eq?" builtinEqP
-    , mkBuiltin "neq?" builtinNeqP
-    , mkBuiltin "equal?" builtinEqualP
     ]
+        <> carCdrBuiltins
+        <> [ mkBuiltin "list" builtinList
+           , mkBuiltin "display" builtinDisplay
+           , mkBuiltin "newline" builtinNewline
+           , mkBuiltin "print" builtinDisplay
+           , mkBuiltin "length" builtinLength
+           , mkBuiltin "append" builtinAppend
+           , mkBuiltin "last" builtinLast
+           , mkBuiltin "memq" builtinMemq
+           , mkBuiltin "set-car!" builtinSetCar
+           , mkBuiltin "set-cdr!" builtinSetCdr
+           , mkBuiltin "string-append" builtinStringAppend
+           , mkBuiltin "symbol->string" builtinSymbolToString
+           , mkBuiltin "string->symbol" builtinStringToSymbol
+           , mkBuiltin "string->number" builtinStringToNumber
+           , mkBuiltin "number->string" builtinNumberToString
+           , mkBuiltin "eq?" builtinEqP
+           , mkBuiltin "neq?" builtinNeqP
+           , mkBuiltin "equal?" builtinEqualP
+           ]
 
 {- | Build a @(name, VBuiltin name fn)@ pair. Having a single source of
 truth for the name prevents the key and the 'VBuiltin' label from drifting.
@@ -217,8 +225,61 @@ builtinCdr args = do
     (_, cdrRef) <- asPair "cdr" value
     liftIO $ readIORef cdrRef
 
+carCdrBuiltins :: [(Text, Value)]
+carCdrBuiltins = mkComposedCarCdr <$> carCdrOperationNames
+
+carCdrOperationNames :: [[Char]]
+carCdrOperationNames = concatMap operationNamesOfLength [2 .. 4]
+  where
+    operationNamesOfLength :: Int -> [[Char]]
+    operationNamesOfLength 0 = [""]
+    operationNamesOfLength n = do
+        op <- ['a', 'd']
+        rest <- operationNamesOfLength (n - 1)
+        pure (op : rest)
+
+mkComposedCarCdr :: [Char] -> (Text, Value)
+mkComposedCarCdr ops =
+    mkBuiltin name (builtinComposedCarCdr name ops)
+  where
+    name = "c" <> T.pack ops <> "r"
+
+builtinComposedCarCdr :: Text -> [Char] -> [Value] -> Eval Value
+builtinComposedCarCdr name ops args = do
+    value <- unaryArg name args
+    foldM (applyCarCdrOp name) value (reverse ops)
+
+applyCarCdrOp :: Text -> Value -> Char -> Eval Value
+applyCarCdrOp name value op = do
+    (carRef, cdrRef) <- asPair name value
+    case op of
+        'a' -> liftIO $ readIORef carRef
+        'd' -> liftIO $ readIORef cdrRef
+        _ -> throwError $ OtherEvalError ("internal car/cdr operation: " <> show op)
+
 builtinList :: [Value] -> Eval Value
 builtinList = listToValue
+
+builtinDisplay :: [Value] -> Eval Value
+builtinDisplay args = do
+    displayValues args
+    pure VUnspecified
+
+builtinNewline :: [Value] -> Eval Value
+builtinNewline [] = do
+    liftIO $ TIO.putStr "\n"
+    pure VUnspecified
+builtinNewline _ = arityError "newline" "exactly 0 arguments"
+
+displayValues :: [Value] -> Eval ()
+displayValues =
+    traverse_ $ \value -> do
+        text <- liftIO $ displayValueIO value
+        liftIO $ TIO.putStr text
+
+displayValueIO :: Value -> IO Text
+displayValueIO (VStr value) = pure value
+displayValueIO value = showValueIO value
 
 builtinLength :: [Value] -> Eval Value
 builtinLength args = do
