@@ -13,6 +13,7 @@
 
 - `errors/*.scm`
   - One malformed source fragment per file.
+  - Checked directly with the parser, not through the interpreter.
   - These are separated from `core` because a single parse error prevents parsing
     the rest of a normal Scheme source file.
 

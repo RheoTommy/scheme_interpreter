@@ -9,6 +9,7 @@ import Control.Monad (foldM)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Scheme.Interpreter qualified as Interpreter
+import Scheme.Parser (parseFile)
 import System.Directory (findExecutable, getTemporaryDirectory, removeFile)
 import System.Environment qualified as Environment
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
@@ -103,13 +104,11 @@ parseErrorSpecTest :: FilePath -> Test
 parseErrorSpecTest path =
     path ~: TestCase $ do
         input <- TIO.readFile path
-        env <- Interpreter.initialEnv
-        result <- Interpreter.runIn env input
-        case result of
+        case parseFile path input of
             Left _ -> pure ()
             Right actual ->
                 assertFailure $
-                    path <> ": expected parse error, got " <> T.unpack actual
+                    path <> ": expected parse error, got " <> show actual
 
 runSpecFile :: FilePath -> Assertion
 runSpecFile path = do

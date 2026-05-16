@@ -54,6 +54,9 @@ let-mut                             ;; => 10
 ;; let* shadowing: same name can be rebound
 (let* ((x 1) (x (+ x 1))) x)      ;; => 2
 
+;; let* rebinding creates a new binding. The closure keeps the old x.
+(let* ((x 1) (f (lambda () x)) (x 2)) (f)) ;; => 1
+
 ;; === letrec ===
 (letrec ((x 1)) x)                 ;; => 1
 (letrec () 1)                      ;; => 1
@@ -98,3 +101,9 @@ do-sum                              ;; => 15
 (do ((i 0 (+ i 1)))
     ((= i 1))
   #f)                               ;; => (unspecified)
+
+;; do variables are freshly rebound on each iteration, not updated in place.
+(let ((f #f))
+  (do ((i 0 (+ i 1)))
+      ((= i 1) (f))
+    (set! f (lambda () i))))         ;; => 0

@@ -617,38 +617,13 @@ evaluatorLiterals =
 
 evaluatorArith :: Test
 evaluatorArith =
-    "Evaluator: arithmetic"
+    "Evaluator: arithmetic edges"
         ~: TestList
-            [ testEvalExpr "(+)" (eApp "+" []) (VNum 0)
-            , testEvalExpr "(+ 1 2)" (eApp "+" [eNum 1, eNum 2]) (VNum 3)
-            , testEvalExpr "(+ 1 2 3)" (eApp "+" [eNum 1, eNum 2, eNum 3]) (VNum 6)
-            , testEvalExpr "(- 5)" (eApp "-" [eNum 5]) (VNum (-5))
-            , testEvalExpr "(- 5 3)" (eApp "-" [eNum 5, eNum 3]) (VNum 2)
-            , testEvalExpr
-                "(- 10 3 2)"
-                (eApp "-" [eNum 10, eNum 3, eNum 2])
-                (VNum 5)
-            , testEvalExpr "(*)" (eApp "*" []) (VNum 1)
-            , testEvalExpr "(* 2 3)" (eApp "*" [eNum 2, eNum 3]) (VNum 6)
-            , testEvalExpr
-                "(* 2 3 4)"
-                (eApp "*" [eNum 2, eNum 3, eNum 4])
-                (VNum 24)
-            , testEvalExpr "(/ 10 2)" (eApp "/" [eNum 10, eNum 2]) (VNum 5)
-            , testEvalExpr "(/ 10 3)" (eApp "/" [eNum 10, eNum 3]) (VNum 3)
+            [ testEvalExpr "(+ 1 2)" (eApp "+" [eNum 1, eNum 2]) (VNum 3)
             , -- R5RS quotient: truncation toward zero (distinct from Haskell `div`)
               testEvalExpr "(/ -7 2)" (eApp "/" [eNum (-7), eNum 2]) (VNum (-3))
             , testEvalExpr "(/ 7 -2)" (eApp "/" [eNum 7, eNum (-2)]) (VNum (-3))
             , testEvalExpr "(/ -7 -2)" (eApp "/" [eNum (-7), eNum (-2)]) (VNum 3)
-            , -- Nested application
-              testEvalExpr
-                "(+ 1 (* 2 3))"
-                (eApp "+" [eNum 1, eApp "*" [eNum 2, eNum 3]])
-                (VNum 7)
-            , testEvalExpr
-                "(* (+ 1 2) (+ 3 4))"
-                (eApp "*" [eApp "+" [eNum 1, eNum 2], eApp "+" [eNum 3, eNum 4]])
-                (VNum 21)
             , testEvalExprFailsWith
                 "(/ 10 0)"
                 (eApp "/" [eNum 10, eNum 0])
@@ -667,23 +642,9 @@ evaluatorArith =
 
 evaluatorCompare :: Test
 evaluatorCompare =
-    "Evaluator: comparisons and predicates"
+    "Evaluator: comparison and predicate edges"
         ~: TestList
             [ testEvalExpr "(= 1 1)" (eApp "=" [eNum 1, eNum 1]) (VBool True)
-            , testEvalExpr "(= 1 2)" (eApp "=" [eNum 1, eNum 2]) (VBool False)
-            , testEvalExpr "(< 1 2)" (eApp "<" [eNum 1, eNum 2]) (VBool True)
-            , testEvalExpr "(< 2 1)" (eApp "<" [eNum 2, eNum 1]) (VBool False)
-            , testEvalExpr "(<= 2 2)" (eApp "<=" [eNum 2, eNum 2]) (VBool True)
-            , testEvalExpr "(> 3 1)" (eApp ">" [eNum 3, eNum 1]) (VBool True)
-            , testEvalExpr "(>= 2 2)" (eApp ">=" [eNum 2, eNum 2]) (VBool True)
-            , testEvalExpr
-                "(number? 42)"
-                (eApp "number?" [eNum 42])
-                (VBool True)
-            , testEvalExpr
-                "(number? \"foo\")"
-                (eApp "number?" [eStr "foo"])
-                (VBool False)
             , testEvalExpr "(number? ())" (eApp "number?" [eNil]) (VBool False)
             , testEvalExprFailsWith
                 "(= 1 \"foo\")"
@@ -779,104 +740,7 @@ evaluatorSpecialForms =
                 (VNum 2)
             ]
 
--- * Interpreter integration tests (Text -> displayed result)
-
--- | Assert that interpreting a Scheme source produces the expected display.
-testInterpret :: Text -> Text -> Test
-testInterpret input expected =
-    T.unpack input ~: TestCase $ do
-        result <- Interpreter.run input
-        case result of
-            Right actual -> assertEqual "" expected actual
-            Left err ->
-                assertFailure $
-                    "Expected "
-                        <> T.unpack expected
-                        <> ", got error: "
-                        <> T.unpack err
-
--- | Assert that interpreting a Scheme source produces an error.
-testInterpretError :: Text -> Text -> Test
-testInterpretError input expectedNeedle =
-    (T.unpack input <> " => ERROR") ~: TestCase $ do
-        result <- Interpreter.run input
-        case result of
-            Left err
-                | expectedNeedle `T.isInfixOf` err -> pure ()
-                | otherwise ->
-                    assertFailure $
-                        "Expected error containing "
-                            <> T.unpack expectedNeedle
-                            <> ", got: "
-                            <> T.unpack err
-            Right actual -> assertFailure $ "Expected error, got: " <> T.unpack actual
-
-interpreterIntegration :: Test
-interpreterIntegration =
-    "Interpreter: end-to-end"
-        ~: TestList
-            [ testInterpret "42" "42"
-            , testInterpret "(+ 1 2)" "3"
-            , testInterpret "(* (+ 1 2) (- 10 4))" "18"
-            , testInterpret "(< 1 2)" "#t"
-            , testInterpret "(number? 42)" "#t"
-            , -- String escape round-trip
-              testInterpret "\"hello\"" "\"hello\""
-            , testInterpret "\"a\\\"b\"" "\"a\\\"b\""
-            , testInterpret "\"line1\\nline2\"" "\"line1\\nline2\""
-            , testInterpret "\"tab\\there\"" "\"tab\\there\""
-            , testInterpret "\"back\\\\slash\"" "\"back\\\\slash\""
-            , testInterpret "(if #f 1)" "(unspecified)"
-            , testInterpret "(cond (#f 1) (#t 2))" "2"
-            , testInterpret "(cond (#f 1) (else 3))" "3"
-            , testInterpret "(and 1 2 \"hello\")" "\"hello\""
-            , testInterpret "(or #f #f 3)" "3"
-            , testInterpret "(begin 1 2 3)" "3"
-            , testInterpret "'x" "x"
-            , testInterpret "'(1 2 3)" "(1 2 3)"
-            , testInterpret "'(a . b)" "(a . b)"
-            , testInterpret "(cons 1 2)" "(1 . 2)"
-            , testInterpret "(list 1 (+ 1 1) 3)" "(1 2 3)"
-            , testInterpret "(append '(1 2) '(3 4))" "(1 2 3 4)"
-            , testInterpretError "(append (cons 1 2))" "proper list"
-            , testInterpretError "(append '(1) (cons 2 3))" "proper list"
-            , testInterpret "(length '(1 2 3))" "3"
-            , testInterpret "(last '(1 2 3))" "3"
-            , testInterpret "(memq 'b '(a b c))" "(b c)"
-            , testInterpret "(null? '())" "#t"
-            , testInterpret "(pair? '(1 2))" "#t"
-            , testInterpret "(list? (cons 1 2))" "#f"
-            , testInterpret "(symbol? 'x)" "#t"
-            , testInterpret "(boolean? #f)" "#t"
-            , testInterpret "(string? \"hi\")" "#t"
-            , testInterpret "(procedure? car)" "#t"
-            , testInterpret "(not #f)" "#t"
-            , testInterpret "(string-append \"hello\" \" \" \"world\")" "\"hello world\""
-            , testInterpret "(symbol->string 'hello)" "\"hello\""
-            , testInterpret "(string->symbol \"hello\")" "hello"
-            , testInterpret "(string->number \"42\")" "42"
-            , testInterpret "(number->string -42)" "\"-42\""
-            , testInterpret "(eq? 'a 'a)" "#t"
-            , testInterpret "(neq? 'a 'a)" "#f"
-            , testInterpret "(equal? '(1 (2 3)) '(1 (2 3)))" "#t"
-            , testInterpretError "(car '())" "type error"
-            , testInterpretError "(length (cons 1 2))" "type error"
-            , testInterpret "((lambda (x) x) 42)" "42"
-            , testInterpret "((lambda (x y) (+ x y)) 1 2)" "3"
-            , testInterpret "((lambda args args) 1 2 3)" "(1 2 3)"
-            , testInterpret "((lambda (x y . rest) rest) 1 2 3 4)" "(3 4)"
-            , testInterpret "(let ((x 1) (y 2)) (+ x y))" "3"
-            , testInterpret "(let* ((x 1) (x (+ x 1))) x)" "2"
-            , testInterpret "(let* ((x 1) (f (lambda () x)) (x 2)) (f))" "1"
-            , testInterpret "(letrec ((fact (lambda (n) (if (= n 0) 1 (* n (fact (- n 1))))))) (fact 5))" "120"
-            , testInterpret "(let loop ((n 3)) (if (= n 0) 'done (loop (- n 1))))" "done"
-            , testInterpret "(do ((i 0 (+ i 1))) ((= i 3) i) #f)" "3"
-            , testInterpret "(let ((f #f)) (do ((i 0 (+ i 1))) ((= i 1) (f)) (set! f (lambda () i))))" "0"
-            , testInterpret "(let ((x 1)) (set! x 2) x)" "2"
-            , testInterpretError "(let ((x 1) (y x)) y)" "unbound variable"
-            ]
-
--- | Test that 'runIn' carries environment updates across calls.
+-- * Interpreter boundary tests
 interpreterRunIn :: Test
 interpreterRunIn =
     "Interpreter.runIn: persistent env"
@@ -990,7 +854,6 @@ main = do
                 , evaluatorCompare
                 , evaluatorApply
                 , evaluatorSpecialForms
-                , interpreterIntegration
                 , interpreterRunIn
                 , coreSpecSuite
                 , parseErrorSpecSuite
