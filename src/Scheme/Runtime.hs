@@ -39,7 +39,6 @@ module Scheme.Runtime (
         ArityError,
         NotAProcedure,
         DivisionByZero,
-        NotImplemented,
         OtherEvalError
     ),
     prettyEvalError,
@@ -276,11 +275,6 @@ data EvalError
     | ArityError Text
     | NotAProcedure Text
     | DivisionByZero
-    | {- | A language form recognized by the analyzer but not yet supported by
-      the evaluator. Distinct from 'OtherEvalError' so tests and UIs can
-      treat it differently from genuine runtime failures.
-      -}
-      NotImplemented Text
     | OtherEvalError Text
     deriving stock (Show, Eq)
 
@@ -292,7 +286,6 @@ prettyEvalError err = case err of
     ArityError msg -> "arity error: " <> msg
     NotAProcedure kind -> "not a procedure: " <> kind
     DivisionByZero -> "division by zero"
-    NotImplemented what -> "not yet implemented: " <> what
     OtherEvalError msg -> msg
 
 -- * Eval monad

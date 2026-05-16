@@ -43,6 +43,7 @@ library
                     , megaparsec ^>=9.7
                     , containers
                     , mtl
+                    , filepath
     mixins:           base hiding (Prelude)
                     , relude (Relude as Prelude)
     hs-source-dirs:   src

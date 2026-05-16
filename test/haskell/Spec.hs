@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
 import Sample.Interpreter (run)
 import Scheme.AST (
     Body (Body),
@@ -937,19 +938,32 @@ interpreterRunIn =
                     r3 <- Interpreter.runIn env "(set-cdr! p '())"
                     r4 <- Interpreter.runIn env "p"
                     assertEqual "" (Right "(unspecified)", Right "(unspecified)", Right "(unspecified)", Right "(10)") (r1, r2, r3, r4)
-            , "top-level load remains NotImplemented"
+            , "runSourceIn evaluates multiple top-level forms in one env"
                 ~: TestCase
                 $ do
                     env <- Interpreter.initialEnv
-                    result <- Interpreter.runIn env "(load \"foo.scm\")"
-                    case result of
-                        Left err
-                            | "not yet implemented" `T.isInfixOf` err -> pure ()
-                            | otherwise ->
-                                assertFailure $
-                                    "Expected 'not yet implemented' error, got: " <> T.unpack err
-                        Right v ->
-                            assertFailure $ "Expected error, got: " <> T.unpack v
+                    result <- Interpreter.runSourceIn env "(define x 1)\n(+ x 2)"
+                    after <- Interpreter.runIn env "x"
+                    assertEqual "" (Right ["(unspecified)", "3"], Right "1") (result, after)
+            , "load evaluates a file in the shared env"
+                ~: TestCase
+                $ do
+                    let path = "/tmp/scheme-interpreter-load-test.scm"
+                    TIO.writeFile path "(define loaded 41)\n(define (inc x) (+ x 1))\n"
+                    env <- Interpreter.initialEnv
+                    r1 <- Interpreter.runIn env "(load \"/tmp/scheme-interpreter-load-test.scm\")"
+                    r2 <- Interpreter.runIn env "(inc loaded)"
+                    assertEqual "" (Right "(unspecified)", Right "42") (r1, r2)
+            , "runFileIn resolves relative load paths from the source file"
+                ~: TestCase
+                $ do
+                    let depPath = "/tmp/scheme-interpreter-load-dep.scm"
+                        mainPath = "/tmp/scheme-interpreter-load-main.scm"
+                    TIO.writeFile depPath "(define loaded-from-file 40)\n"
+                    TIO.writeFile mainPath "(load \"scheme-interpreter-load-dep.scm\")\n(+ loaded-from-file 2)\n"
+                    env <- Interpreter.initialEnv
+                    result <- Interpreter.runFileIn env mainPath
+                    assertEqual "" (Right ["(unspecified)", "42"]) result
             ]
 
 -- * Sample interpreter tests (kept from before)
