@@ -63,11 +63,14 @@ test-suite scheme-interpreter-test
     import:           lang
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
+    other-modules:    SchemeSpecRunner
     hs-source-dirs:   test/haskell
     build-depends:    base >=4.20 && <5
                     , scheme-interpreter
                     , relude ^>=1.2
                     , text
                     , HUnit
+                    , directory
+                    , process
     mixins:           base hiding (Prelude)
                     , relude (Relude as Prelude)

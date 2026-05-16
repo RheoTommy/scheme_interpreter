@@ -23,3 +23,6 @@ run = [
     "cabal build --ghc-options=-Werror",
     "cabal test --ghc-options=-Werror",
 ]
+
+[tools]
+guile = "latest"

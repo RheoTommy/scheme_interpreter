@@ -2,7 +2,6 @@ module Main (main) where
 
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import Sample.Interpreter (run)
 import Scheme.AST (
     Body (Body),
     CondClauses (CondClauses, CondElseOnly),
@@ -34,6 +33,7 @@ import Scheme.Runtime (
     showValue,
  )
 import Scheme.SExpr (SExpr (SBool, SNil, SNum, SPair, SStr, SSym))
+import SchemeSpecRunner (coreSpecSuite, parseErrorSpecSuite, r5rsSpecSuite)
 import Test.HUnit (
     Counts (errors, failures),
     Test (TestCase, TestList),
@@ -65,20 +65,6 @@ testParseFile input expected =
     T.unpack input ~: case parseFile "<test>" input of
         Right actual -> assertEqual "" expected actual
         Left err -> assertFailure $ "Parse failed: " <> show err
-
--- | Assert that evaluating input produces the expected output string.
-testEval :: Text -> Text -> Test
-testEval input expected =
-    T.unpack input ~: case run input of
-        Right actual -> assertEqual "" expected actual
-        Left err -> assertFailure $ "Expected " <> T.unpack expected <> ", got error: " <> T.unpack err
-
--- | Assert that evaluating input produces an error.
-testError :: Text -> Test
-testError input =
-    (T.unpack input <> " => ERROR") ~: case run input of
-        Left _ -> pure ()
-        Right v -> assertFailure $ "Expected error, got: " <> T.unpack v
 
 -- * Helper to build SExpr lists
 
@@ -966,41 +952,6 @@ interpreterRunIn =
                     assertEqual "" (Right ["(unspecified)", "42"]) result
             ]
 
--- * Sample interpreter tests (kept from before)
-
-step0 :: Test
-step0 =
-    "Step 0: Literals"
-        ~: TestList
-            [ testEval "42" "42"
-            , testEval "0" "0"
-            , testEval "-1" "-1"
-            ]
-
-step1 :: Test
-step1 =
-    "Step 1: Arithmetic"
-        ~: TestList
-            [ testEval "(+ 1 2)" "3"
-            , testEval "(+ 1 2 3)" "6"
-            , testEval "(+)" "0"
-            , testEval "(- 5 3)" "2"
-            , testEval "(- 10 3 2)" "5"
-            , testEval "(- 5)" "-5"
-            , testEval "(* 2 3)" "6"
-            , testEval "(* 2 3 4)" "24"
-            , testEval "(*)" "1"
-            , testEval "(/ 10 2)" "5"
-            , testEval "(/ 10 3)" "3"
-            , testEval "(+ 1 (* 2 3))" "7"
-            , testEval "(* (+ 1 2) (+ 3 4))" "21"
-            , testEval "(- (* 3 3) (* 2 2))" "5"
-            , testError "(/ 10 0)"
-            , testError "(-)"
-            , testError "(/ 1)"
-            , testError "(+ 1 x)"
-            ]
-
 main :: IO ()
 main = do
     result <-
@@ -1041,8 +992,9 @@ main = do
                 , evaluatorSpecialForms
                 , interpreterIntegration
                 , interpreterRunIn
-                , step0
-                , step1
+                , coreSpecSuite
+                , parseErrorSpecSuite
+                , r5rsSpecSuite
                 ]
     if errors result + failures result == 0
         then exitSuccess
