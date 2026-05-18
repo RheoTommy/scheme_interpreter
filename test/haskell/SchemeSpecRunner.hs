@@ -1,4 +1,5 @@
 module SchemeSpecRunner (
+    callCcSpecSuite,
     coreSpecSuite,
     floatingNumberSpecSuite,
     macroSpecSuite,
@@ -95,6 +96,11 @@ macroSpecSuite =
     "Mini-Scheme macro specs"
         ~: TestList (specFileTest <$> macroSpecFiles)
 
+callCcSpecSuite :: Test
+callCcSpecSuite =
+    "Mini-Scheme call/cc specs"
+        ~: TestList (specFileTest <$> callCcSpecFiles)
+
 coreSpecFiles :: [FilePath]
 coreSpecFiles =
     [ "test/spec/core/step0-parse-literals.scm"
@@ -114,6 +120,7 @@ optionSpecFiles =
     [ "test/spec/options/step8-tco.scm"
     , "test/spec/options/floating-numbers.scm"
     , "test/spec/options/step9-macros.scm"
+    , "test/spec/options/call-cc.scm"
     , "test/spec/options/step11-next-target-programs.scm"
     , "test/spec/options/manual-stress-programs.scm"
     ]
@@ -131,6 +138,11 @@ floatingNumberSpecFiles =
 macroSpecFiles :: [FilePath]
 macroSpecFiles =
     [ "test/spec/options/step9-macros.scm"
+    ]
+
+callCcSpecFiles :: [FilePath]
+callCcSpecFiles =
+    [ "test/spec/options/call-cc.scm"
     ]
 
 parseErrorSpecFiles :: [FilePath]

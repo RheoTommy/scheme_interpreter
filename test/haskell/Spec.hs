@@ -35,6 +35,7 @@ import Scheme.Runtime (
  )
 import Scheme.SExpr (SExpr (SBool, SNil, SNum, SPair, SStr, SSym))
 import SchemeSpecRunner (
+    callCcSpecSuite,
     coreSpecSuite,
     floatingNumberSpecSuite,
     macroSpecSuite,
@@ -893,6 +894,7 @@ main = do
                 , tcoSpecSuite
                 , floatingNumberSpecSuite
                 , macroSpecSuite
+                , callCcSpecSuite
                 , parseErrorSpecSuite
                 , r5rsSpecSuite
                 ]
