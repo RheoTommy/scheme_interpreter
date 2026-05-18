@@ -35,6 +35,7 @@ import Scheme.AST (Toplevel (TDefine, TExpr, TLoad))
 import Scheme.Analyzer (AnalyzeError (AnalyzeError), analyzeToplevel)
 import Scheme.Environment (initialEnv)
 import Scheme.Evaluator (evaluate, evaluateDefine)
+import Scheme.Macro (ExpandedToplevel (ExpandedExpression, ExpandedMacroDefinition), expandToplevel)
 import Scheme.Parser (parseFile, parseSExpr, prettyError)
 import Scheme.Runtime (
     Env,
@@ -44,6 +45,7 @@ import Scheme.Runtime (
     runEval,
     showValueIO,
  )
+import Scheme.SExpr (SExpr)
 import System.FilePath (isRelative, takeDirectory, (</>))
 
 {- | Parse, analyze, and evaluate a single top-level form in the given
@@ -55,9 +57,7 @@ message on failure at any pipeline stage.
 runIn :: Env -> Text -> IO (Either Text Text)
 runIn env input = case parseSExpr input of
     Left err -> pure $ Left ("parse error: " <> toText (prettyError err))
-    Right sexpr -> case analyzeToplevel sexpr of
-        Left (AnalyzeError msg) -> pure $ Left ("analyze error: " <> msg)
-        Right toplevel -> evalToplevelIn "." env toplevel
+    Right sexpr -> evalSExprIn "." env sexpr
 
 {- | Convenience wrapper: parse, analyze, and evaluate a single top-level
 form in a fresh environment. Equivalent to @initialEnv >>= flip runIn input@.
@@ -82,19 +82,27 @@ runFileIn env path = do
 runSourceWithBaseDir :: FilePath -> FilePath -> Env -> Text -> IO (Either Text [Text])
 runSourceWithBaseDir baseDir sourceName env input = case parseFile sourceName input of
     Left err -> pure $ Left ("parse error: " <> toText (prettyError err))
-    Right sexprs -> case traverse analyzeToplevel sexprs of
-        Left (AnalyzeError msg) -> pure $ Left ("analyze error: " <> msg)
-        Right toplevels -> evalToplevels baseDir env toplevels
+    Right sexprs -> evalSExprs baseDir env sexprs
 
-evalToplevels :: FilePath -> Env -> [Toplevel] -> IO (Either Text [Text])
-evalToplevels _ _ [] = pure $ Right []
-evalToplevels baseDir env (toplevel : rest) = do
-    result <- evalToplevelIn baseDir env toplevel
+evalSExprs :: FilePath -> Env -> [SExpr] -> IO (Either Text [Text])
+evalSExprs _ _ [] = pure $ Right []
+evalSExprs baseDir env (sexpr : rest) = do
+    result <- evalSExprIn baseDir env sexpr
     case result of
         Left err -> pure $ Left err
         Right output -> do
-            restResult <- evalToplevels baseDir env rest
+            restResult <- evalSExprs baseDir env rest
             pure $ (output :) <$> restResult
+
+evalSExprIn :: FilePath -> Env -> SExpr -> IO (Either Text Text)
+evalSExprIn baseDir env sexpr = do
+    expanded <- runEval env (expandToplevel sexpr)
+    case expanded of
+        Left err -> pure $ Left ("macro error: " <> prettyEvalError err)
+        Right ExpandedMacroDefinition -> Right <$> showValueIO VUnspecified
+        Right (ExpandedExpression expandedSExpr) -> case analyzeToplevel expandedSExpr of
+            Left (AnalyzeError msg) -> pure $ Left ("analyze error: " <> msg)
+            Right toplevel -> evalToplevelIn baseDir env toplevel
 
 evalToplevelIn :: FilePath -> Env -> Toplevel -> IO (Either Text Text)
 evalToplevelIn baseDir env toplevel = case toplevel of

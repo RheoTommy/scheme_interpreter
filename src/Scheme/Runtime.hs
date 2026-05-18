@@ -11,7 +11,7 @@ and 'VClosure', while 'Eval' carries 'Env' which carries 'Value'.
 -}
 module Scheme.Runtime (
     -- * Values
-    Value (VNum, VBool, VStr, VSym, VNil, VUnspecified, VPair, VClosure, VBuiltin),
+    Value (VNum, VBool, VStr, VSym, VNil, VUnspecified, VPair, VClosure, VMacro, VBuiltin),
     showValue,
     showValueIO,
     showValueKind,
@@ -29,6 +29,7 @@ module Scheme.Runtime (
     bindUninitializedInFrame,
     defineVar,
     defineUninitializedVar,
+    lookupVarMaybe,
     lookupVar,
     setVar,
 
@@ -72,6 +73,8 @@ data Value
       VPair (IORef Value) (IORef Value)
     | -- | Closure: formal params, body, captured environment.
       VClosure Params Body Env
+    | -- | Macro transformer: formal params, body, captured expansion environment.
+      VMacro Params Body Env
     | -- | Builtin procedure. The name is retained for display and error messages.
       VBuiltin Text ([Value] -> Eval Value)
     | -- | Placeholder used while evaluating recursive bindings.
@@ -91,6 +94,7 @@ showValue v = case v of
     VUnspecified -> "(unspecified)"
     VPair{} -> "<pair>"
     VClosure{} -> "<closure>"
+    VMacro{} -> "<macro>"
     VBuiltin name _ -> "<builtin: " <> name <> ">"
     VUninitialized name -> "<uninitialized: " <> name <> ">"
 
@@ -181,6 +185,7 @@ showValueKind v = case v of
     VUnspecified -> "unspecified"
     VPair{} -> "pair"
     VClosure{} -> "closure"
+    VMacro{} -> "macro"
     VBuiltin{} -> "builtin"
     VUninitialized{} -> "uninitialized"
 
@@ -248,6 +253,13 @@ lookupVar ident = do
                 VUninitialized name -> throwError $ OtherEvalError ("uninitialized variable: " <> name)
                 _ -> pure value
         Nothing -> throwError $ UnboundVariable (idToText ident)
+
+-- | Look up a variable without treating absence as an evaluation error.
+lookupVarMaybe :: Id -> Eval (Maybe Value)
+lookupVarMaybe ident = do
+    env <- ask
+    mref <- liftIO (findRef ident env)
+    traverse readIORef mref
 
 -- | Update an existing binding, walking up the parent chain.
 setVar :: Id -> Value -> Eval ()

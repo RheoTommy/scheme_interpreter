@@ -8,6 +8,7 @@
 (positive 5)            ;; => #t
 (positive -3)           ;; => #f
 (positive (+ 1 2))      ;; => #t
+'(positive 5)           ;; => (positive 5)
 
 ;; === Macro vs function: arguments not evaluated ===
 ;; This macro receives the unevaluated expression (+ 1 2),
@@ -36,7 +37,7 @@ pi                       ;; => 314
   (let*-expander vars body))
 
 (my-let* ((x 1) (y (+ x 1)) (z (+ x y)))
-  z)                     ;; => 4
+  z)                     ;; => 3
 
 ;; === when / unless ===
 (define-macro (when test . body)

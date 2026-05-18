@@ -1,6 +1,7 @@
 module SchemeSpecRunner (
     coreSpecSuite,
     floatingNumberSpecSuite,
+    macroSpecSuite,
     optionSpecSyntaxSuite,
     parseErrorSpecSuite,
     r5rsSpecSuite,
@@ -89,6 +90,11 @@ floatingNumberSpecSuite =
     "Mini-Scheme floating-number specs"
         ~: TestList (specFileTest <$> floatingNumberSpecFiles)
 
+macroSpecSuite :: Test
+macroSpecSuite =
+    "Mini-Scheme macro specs"
+        ~: TestList (specFileTest <$> macroSpecFiles)
+
 coreSpecFiles :: [FilePath]
 coreSpecFiles =
     [ "test/spec/core/step0-parse-literals.scm"
@@ -120,6 +126,11 @@ tcoSpecFiles =
 floatingNumberSpecFiles :: [FilePath]
 floatingNumberSpecFiles =
     [ "test/spec/options/floating-numbers.scm"
+    ]
+
+macroSpecFiles :: [FilePath]
+macroSpecFiles =
+    [ "test/spec/options/step9-macros.scm"
     ]
 
 parseErrorSpecFiles :: [FilePath]

@@ -32,6 +32,7 @@ library
                     , Scheme.Builtin
                     , Scheme.Environment
                     , Scheme.Evaluator
+                    , Scheme.Macro
                     , Scheme.Interpreter
                     , Sample.Types
                     , Sample.Parser

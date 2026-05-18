@@ -5,8 +5,10 @@ analysis live upstream in 'Scheme.Parser' and 'Scheme.Analyzer', and
 the end-to-end @Text -> Value@ driver lives in 'Scheme.Interpreter'.
 -}
 module Scheme.Evaluator (
+    applyMacro,
     evaluate,
     evaluateDefine,
+    quoteToValue,
 ) where
 
 import Control.Monad.Except (throwError)
@@ -39,7 +41,7 @@ import Scheme.Runtime (
     Env,
     Eval,
     EvalError (ArityError, NotAProcedure),
-    Value (VBool, VBuiltin, VClosure, VNil, VNum, VPair, VStr, VSym, VUnspecified),
+    Value (VBool, VBuiltin, VClosure, VMacro, VNil, VNum, VPair, VStr, VSym, VUnspecified),
     bindInFrame,
     bindUninitializedInFrame,
     defineUninitializedVar,
@@ -122,6 +124,14 @@ applyTail (VClosure params body closureEnv) args = do
     bindParams params args callEnv
     pure $ StepBody callEnv body
 applyTail v _ = throwError $ NotAProcedure (showValueKind v)
+
+-- | Apply a macro transformer to already-quoted syntax arguments.
+applyMacro :: Value -> [Value] -> Eval Value
+applyMacro (VMacro params body closureEnv) args = do
+    callEnv <- liftIO $ newChildFrame closureEnv
+    bindParams params args callEnv
+    local (const callEnv) (evalBody body)
+applyMacro v _ = throwError $ NotAProcedure (showValueKind v)
 
 bindParams :: Params -> [Value] -> Env -> Eval ()
 bindParams (Params fixed restArg) args frame = do
