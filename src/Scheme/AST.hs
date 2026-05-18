@@ -41,6 +41,7 @@ module Scheme.AST (
 ) where
 
 import Data.Text qualified as T (null)
+import Scheme.Number (Number)
 import Scheme.SExpr (SExpr)
 
 -- | Scheme identifier. Guaranteed non-empty by the smart constructor 'mkId'.
@@ -123,7 +124,7 @@ data Expr
 > Const ::= Num | Bool | String | ()
 -}
 data Literal
-    = LNum Integer
+    = LNum Number
     | LBool Bool
     | LStr Text
     | LNil

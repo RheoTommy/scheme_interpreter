@@ -32,7 +32,7 @@
   - `cabal test` still checks that these files are parseable Mini-Scheme
     S-expression sources, so future target programs do not silently rot.
   - Implemented options may also have a dedicated executable suite. Currently
-    `step8-tco.scm` is evaluated by default.
+    `step8-tco.scm` and `floating-numbers.scm` are evaluated by default.
 
 ## Expectation Syntax
 

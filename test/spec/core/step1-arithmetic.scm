@@ -18,7 +18,7 @@
 
 ;; Division
 (/ 10 2)        ;; => 5
-(/ 10 3)        ;; => 3
+(/ 10 3)        ;; => 10/3
 
 ;; Division by zero
 (/ 10 0)        ;; => ERROR
@@ -44,6 +44,13 @@
 ;; Negative number arithmetic
 (+ -1 -2)       ;; => -3
 (* -3 -4)       ;; => 12
+
+;; Rational and floating-point arithmetic
+(+ 1.5 2)       ;; => 3.5
+(* 1.5 2)       ;; => 3.0
+(/ 10 4)        ;; => 5/2
+(/ 10.0 4)      ;; => 2.5
+(< 1.5 2)       ;; => #t
 
 ;; Type predicates
 (number? 42)     ;; => #t

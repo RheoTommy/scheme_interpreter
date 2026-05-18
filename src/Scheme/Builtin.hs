@@ -4,7 +4,7 @@ Exports the initial list of builtin bindings that populate the top-level
 environment.
 
 This module provides the small builtin surface needed by the current
-Mini-Scheme evaluator: integer arithmetic, predicates, mutable pairs,
+Mini-Scheme evaluator: numeric arithmetic, predicates, mutable pairs,
 proper-list utilities, equality, and basic string/symbol conversions.
 -}
 module Scheme.Builtin (builtins) where
@@ -13,6 +13,7 @@ import Control.Monad (foldM)
 import Control.Monad.Except (throwError)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
+import Scheme.Number (Number, numberDiv, numberToText, parseNumberText)
 import Scheme.Runtime (
     Eval,
     EvalError (ArityError, DivisionByZero, OtherEvalError, TypeError),
@@ -93,7 +94,7 @@ binaryArgs _ [a, b] = pure (a, b)
 binaryArgs name _ = arityError name "exactly 2 arguments"
 
 -- | Require a value to be a number; otherwise raise 'TypeError'.
-asNum :: Text -> Value -> Eval Integer
+asNum :: Text -> Value -> Eval Number
 asNum _ (VNum n) = pure n
 asNum name value = typeError name "number" value
 
@@ -136,23 +137,13 @@ builtinDiv :: [Value] -> Eval Value
 builtinDiv [a, b] = do
     n <- asNum "/" a
     m <- asNum "/" b
-    case safeQuot n m of
+    case numberDiv n m of
         Just q -> pure (VNum q)
         Nothing -> throwError DivisionByZero
 builtinDiv _ = throwError $ ArityError "/: expected exactly 2 arguments"
 
-{- | Truncation-toward-zero integer division, matching R5RS @quotient@
-semantics. Returns 'Nothing' on zero divisor.
-
-HLint's partial group flags 'quot'; the guard here makes the usage total,
-and the scoped ignore in .hlint.yaml acknowledges this.
--}
-safeQuot :: Integer -> Integer -> Maybe Integer
-safeQuot _ 0 = Nothing
-safeQuot n m = Just (n `quot` m)
-
 -- | Binary numeric comparison: @(op a b)@ returns a boolean.
-numericCmp :: Text -> (Integer -> Integer -> Bool) -> [Value] -> Eval Value
+numericCmp :: Text -> (Number -> Number -> Bool) -> [Value] -> Eval Value
 numericCmp name op [a, b] = do
     n <- asNum name a
     m <- asNum name b
@@ -284,7 +275,7 @@ displayValueIO value = showValueIO value
 builtinLength :: [Value] -> Eval Value
 builtinLength args = do
     value <- unaryArg "length" args
-    VNum <$> properListLength value
+    VNum . fromInteger <$> properListLength value
 
 builtinAppend :: [Value] -> Eval Value
 builtinAppend [] = pure VNil
@@ -348,12 +339,12 @@ builtinStringToSymbol args = VSym <$> (unaryArg "string->symbol" args >>= asStri
 builtinStringToNumber :: [Value] -> Eval Value
 builtinStringToNumber args = do
     value <- unaryArg "string->number" args >>= asString "string->number"
-    pure $ maybe (VBool False) VNum (readMaybe (T.unpack value))
+    pure $ maybe (VBool False) VNum (parseNumberText value)
 
 builtinNumberToString :: [Value] -> Eval Value
 builtinNumberToString args = do
     value <- unaryArg "number->string" args >>= asNum "number->string"
-    pure $ VStr (show value)
+    pure $ VStr (numberToText value)
 
 builtinEqP :: [Value] -> Eval Value
 builtinEqP args = do

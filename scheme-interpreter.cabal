@@ -23,7 +23,8 @@ common lang
 
 library
     import:           lang
-    exposed-modules:  Scheme.SExpr
+    exposed-modules:  Scheme.Number
+                    , Scheme.SExpr
                     , Scheme.AST
                     , Scheme.Analyzer
                     , Scheme.Parser

@@ -17,6 +17,7 @@ import Scheme.Analyzer (analyze, analyzeToplevel)
 import Scheme.Environment (initialEnv)
 import Scheme.Evaluator (evaluate)
 import Scheme.Interpreter qualified as Interpreter
+import Scheme.Number (Number (NInexactReal, NRational))
 import Scheme.Parser (parseFile, parseSExpr)
 import Scheme.Runtime (
     EvalError (
@@ -33,7 +34,7 @@ import Scheme.Runtime (
     showValue,
  )
 import Scheme.SExpr (SExpr (SBool, SNil, SNum, SPair, SStr, SSym))
-import SchemeSpecRunner (coreSpecSuite, optionSpecSyntaxSuite, parseErrorSpecSuite, r5rsSpecSuite, tcoSpecSuite)
+import SchemeSpecRunner (coreSpecSuite, floatingNumberSpecSuite, optionSpecSyntaxSuite, parseErrorSpecSuite, r5rsSpecSuite, tcoSpecSuite)
 import Test.HUnit (
     Counts (errors, failures),
     Test (TestCase, TestList),
@@ -72,6 +73,9 @@ testParseFile input expected =
 slist :: [SExpr] -> SExpr
 slist = foldr SPair SNil
 
+nRational :: Integer -> Integer -> Number
+nRational n d = NRational (fromInteger n / fromInteger d)
+
 -- * Parser tests
 
 parserNums :: Test
@@ -86,6 +90,11 @@ parserNums =
             , testParse "  42  " (SNum 42) -- whitespace
             , testParse "+42" (SNum 42)
             , testParse "+0" (SNum 0)
+            , testParse "1.5" (SNum (NInexactReal 1.5))
+            , testParse "-2.5" (SNum (NInexactReal (-2.5)))
+            , testParse "+0.25" (SNum (NInexactReal 0.25))
+            , testParse "10/3" (SNum (nRational 10 3))
+            , testParse "-10/3" (SNum (nRational (-10) 3))
             ]
 
 parserBools :: Test
@@ -276,6 +285,8 @@ analyzerLiterals =
     "Analyzer: literals"
         ~: TestList
             [ testAnalyze "42" (ELit (LNum 42))
+            , testAnalyze "1.5" (ELit (LNum (NInexactReal 1.5)))
+            , testAnalyze "10/3" (ELit (LNum (nRational 10 3)))
             , testAnalyze "#t" (ELit (LBool True))
             , testAnalyze "#f" (ELit (LBool False))
             , testAnalyze "\"hello\"" (ELit (LStr "hello"))
@@ -583,7 +594,13 @@ isDivisionByZero _ = False
 -- * AST-building helpers for readable evaluator tests
 
 eNum :: Integer -> Expr
-eNum = ELit . LNum
+eNum = ELit . LNum . fromInteger
+
+eInexactReal :: Double -> Expr
+eInexactReal = ELit . LNum . NInexactReal
+
+eRat :: Integer -> Integer -> Expr
+eRat n d = ELit . LNum $ nRational n d
 
 eBool :: Bool -> Expr
 eBool = ELit . LBool
@@ -609,6 +626,8 @@ evaluatorLiterals =
             [ testEvalExpr "42" (eNum 42) (VNum 42)
             , testEvalExpr "0" (eNum 0) (VNum 0)
             , testEvalExpr "-1" (eNum (-1)) (VNum (-1))
+            , testEvalExpr "1.5" (eInexactReal 1.5) (VNum (NInexactReal 1.5))
+            , testEvalExpr "10/3" (eRat 10 3) (VNum (nRational 10 3))
             , testEvalExpr "#t" (eBool True) (VBool True)
             , testEvalExpr "#f" (eBool False) (VBool False)
             , testEvalExpr "\"hello\"" (eStr "hello") (VStr "hello")
@@ -620,10 +639,14 @@ evaluatorArith =
     "Evaluator: arithmetic edges"
         ~: TestList
             [ testEvalExpr "(+ 1 2)" (eApp "+" [eNum 1, eNum 2]) (VNum 3)
-            , -- R5RS quotient: truncation toward zero (distinct from Haskell `div`)
-              testEvalExpr "(/ -7 2)" (eApp "/" [eNum (-7), eNum 2]) (VNum (-3))
-            , testEvalExpr "(/ 7 -2)" (eApp "/" [eNum 7, eNum (-2)]) (VNum (-3))
-            , testEvalExpr "(/ -7 -2)" (eApp "/" [eNum (-7), eNum (-2)]) (VNum 3)
+            , testEvalExpr "(+ 1.5 2)" (eApp "+" [eInexactReal 1.5, eNum 2]) (VNum (NInexactReal 3.5))
+            , testEvalExpr "(* 1.5 2)" (eApp "*" [eInexactReal 1.5, eNum 2]) (VNum (NInexactReal 3.0))
+            , testEvalExpr "(/ 10 2)" (eApp "/" [eNum 10, eNum 2]) (VNum 5)
+            , testEvalExpr "(/ 10 4)" (eApp "/" [eNum 10, eNum 4]) (VNum (nRational 5 2))
+            , testEvalExpr "(/ -7 2)" (eApp "/" [eNum (-7), eNum 2]) (VNum (nRational (-7) 2))
+            , testEvalExpr "(/ 7 -2)" (eApp "/" [eNum 7, eNum (-2)]) (VNum (nRational (-7) 2))
+            , testEvalExpr "(/ -7 -2)" (eApp "/" [eNum (-7), eNum (-2)]) (VNum (nRational 7 2))
+            , testEvalExpr "(/ 7.0 2)" (eApp "/" [eInexactReal 7.0, eNum 2]) (VNum (NInexactReal 3.5))
             , testEvalExprFailsWith
                 "(/ 10 0)"
                 (eApp "/" [eNum 10, eNum 0])
@@ -645,6 +668,8 @@ evaluatorCompare =
     "Evaluator: comparison and predicate edges"
         ~: TestList
             [ testEvalExpr "(= 1 1)" (eApp "=" [eNum 1, eNum 1]) (VBool True)
+            , testEvalExpr "(= 1 1.0)" (eApp "=" [eNum 1, eInexactReal 1.0]) (VBool True)
+            , testEvalExpr "(< 1.5 2)" (eApp "<" [eInexactReal 1.5, eNum 2]) (VBool True)
             , testEvalExpr "(number? ())" (eApp "number?" [eNil]) (VBool False)
             , testEvalExprFailsWith
                 "(= 1 \"foo\")"
@@ -858,6 +883,7 @@ main = do
                 , coreSpecSuite
                 , optionSpecSyntaxSuite
                 , tcoSpecSuite
+                , floatingNumberSpecSuite
                 , parseErrorSpecSuite
                 , r5rsSpecSuite
                 ]

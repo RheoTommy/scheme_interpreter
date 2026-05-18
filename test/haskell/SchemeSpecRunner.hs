@@ -1,5 +1,6 @@
 module SchemeSpecRunner (
     coreSpecSuite,
+    floatingNumberSpecSuite,
     optionSpecSyntaxSuite,
     parseErrorSpecSuite,
     r5rsSpecSuite,
@@ -83,6 +84,11 @@ tcoSpecSuite =
     "Mini-Scheme TCO specs"
         ~: TestList (specFileTest <$> tcoSpecFiles)
 
+floatingNumberSpecSuite :: Test
+floatingNumberSpecSuite =
+    "Mini-Scheme floating-number specs"
+        ~: TestList (specFileTest <$> floatingNumberSpecFiles)
+
 coreSpecFiles :: [FilePath]
 coreSpecFiles =
     [ "test/spec/core/step0-parse-literals.scm"
@@ -100,6 +106,7 @@ coreSpecFiles =
 optionSpecFiles :: [FilePath]
 optionSpecFiles =
     [ "test/spec/options/step8-tco.scm"
+    , "test/spec/options/floating-numbers.scm"
     , "test/spec/options/step9-macros.scm"
     , "test/spec/options/step11-next-target-programs.scm"
     , "test/spec/options/manual-stress-programs.scm"
@@ -108,6 +115,11 @@ optionSpecFiles =
 tcoSpecFiles :: [FilePath]
 tcoSpecFiles =
     [ "test/spec/options/step8-tco.scm"
+    ]
+
+floatingNumberSpecFiles :: [FilePath]
+floatingNumberSpecFiles =
+    [ "test/spec/options/floating-numbers.scm"
     ]
 
 parseErrorSpecFiles :: [FilePath]

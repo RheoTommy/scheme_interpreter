@@ -52,6 +52,7 @@ import Control.Monad.Except (throwError)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as T
 import Scheme.AST (Body, Id, Params, idToText)
+import Scheme.Number (Number, numberToText)
 
 -- * Value
 
@@ -60,7 +61,7 @@ import Scheme.AST (Body, Id, Params, idToText)
 Mutually recursive with 'Env' via 'VClosure' and with 'Eval' via 'VBuiltin'.
 -}
 data Value
-    = VNum Integer
+    = VNum Number
     | VBool Bool
     | VStr Text
     | VSym Text
@@ -81,7 +82,7 @@ require 'IO'); a richer printer can be layered on top.
 -}
 showValue :: Value -> Text
 showValue v = case v of
-    VNum n -> show n
+    VNum n -> numberToText n
     VBool True -> "#t"
     VBool False -> "#f"
     VStr s -> "\"" <> escapeSchemeString s <> "\""

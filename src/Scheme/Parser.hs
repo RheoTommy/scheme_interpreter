@@ -2,6 +2,7 @@ module Scheme.Parser (parseSExpr, parseFile, ParseError, prettyError) where
 
 import Data.Char qualified as Char
 import Data.Text qualified as T
+import Scheme.Number (parseNumberText)
 import Scheme.SExpr (SExpr (SBool, SNil, SNum, SPair, SStr, SSym))
 import Text.Megaparsec (
     Parsec,
@@ -67,7 +68,7 @@ sExpr =
             <?> "S-expression"
         )
 
-{- | Integer literal. Tries to parse a signed decimal integer,
+{- | Numeric literal. Tries to parse a signed decimal integer or float,
 and ensures it is not followed by identifier characters.
 TODO: Support hex (#x), octal (#o), binary (#b) literals if needed.
 -}
@@ -75,11 +76,22 @@ sNum :: Parser SExpr
 sNum = do
     sign <- M.optional (choice [single '-', single '+'])
     digits <- takeWhile1P (Just "digit") Char.isDigit
+    suffix <-
+        M.optional . try $
+            choice
+                [ do
+                    separator <- single '/'
+                    denominatorDigits <- takeWhile1P (Just "digit") Char.isDigit
+                    pure $ T.cons separator denominatorDigits
+                , do
+                    dot <- single '.'
+                    fractionDigits <- takeWhile1P (Just "digit") Char.isDigit
+                    pure $ T.cons dot fractionDigits
+                ]
     notFollowedBy (satisfy isIdChar)
-    let numText = maybe digits (\s -> if s == '+' then digits else "-" <> digits) sign
-    -- readMaybe always succeeds here since numText matches [-]?[0-9]+,
-    -- but we handle Nothing for totality.
-    case readMaybe (T.unpack numText) of
+    let signText = maybe "" T.singleton sign
+        numText = signText <> digits <> fromMaybe "" suffix
+    case parseNumberText numText of
         Just n -> pure (SNum n)
         Nothing -> fail $ "Invalid number: " <> T.unpack numText
 
@@ -146,7 +158,7 @@ sList = between (symbol "(") (single ')') $ do
 sSym :: Parser SExpr
 sSym = do
     name <- takeWhile1P (Just "identifier character") isIdChar
-    when (isJust (readMaybe @Integer (T.unpack name))) $
+    when (isJust (parseNumberText name)) $
         fail "Expected identifier, got number"
     -- Bare "." is not a valid symbol; it is only used as a dot separator in lists.
     when (name == ".") $
