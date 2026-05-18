@@ -18,7 +18,7 @@ import Scheme.Runtime (
     Eval,
     EvalError (ArityError, DivisionByZero, OtherEvalError, TypeError),
     PairCell,
-    Value (VBool, VBuiltin, VClosure, VNil, VNum, VPair, VStr, VSym, VUnspecified),
+    Value (VBool, VBuiltin, VClosure, VContinuation, VNil, VNum, VPair, VStr, VSym, VUnspecified),
     pairSeen,
     samePair,
     showValueIO,
@@ -46,6 +46,8 @@ builtins =
     , mkBuiltin "list?" builtinListP
     , mkBuiltin "procedure?" (unaryPredicate "procedure?" isProcedure)
     , mkBuiltin "not" builtinNot
+    , mkBuiltin "call/cc" builtinCallCC
+    , mkBuiltin "call-with-current-continuation" builtinCallCC
     , mkBuiltin "cons" builtinCons
     , mkBuiltin "car" builtinCar
     , mkBuiltin "cdr" builtinCdr
@@ -185,7 +187,13 @@ isPair _ = False
 isProcedure :: Value -> Bool
 isProcedure VClosure{} = True
 isProcedure VBuiltin{} = True
+isProcedure VContinuation{} = True
 isProcedure _ = False
+
+builtinCallCC :: [Value] -> Eval Value
+builtinCallCC _ =
+    throwError $
+        OtherEvalError "call/cc: internal continuation primitive used outside evaluator"
 
 builtinListP :: [Value] -> Eval Value
 builtinListP args = do

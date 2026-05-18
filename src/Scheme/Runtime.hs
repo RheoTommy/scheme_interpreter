@@ -6,12 +6,13 @@ Contains mutually recursive runtime types in a single module:
   * 'Frame' / 'Env' — lexical environment
   * 'Eval'   — evaluation monad: @ExceptT EvalError (ReaderT Env IO)@
 
-These must live together because 'Value' carries 'Eval' (in 'VBuiltin')
-and 'VClosure', while 'Eval' carries 'Env' which carries 'Value'.
+These must live together because 'Value' carries 'Eval' (in 'VBuiltin'
+and 'VContinuation') and 'VClosure', while 'Eval' carries 'Env' which
+carries 'Value'.
 -}
 module Scheme.Runtime (
     -- * Values
-    Value (VNum, VBool, VStr, VSym, VNil, VUnspecified, VPair, VClosure, VMacro, VBuiltin),
+    Value (VNum, VBool, VStr, VSym, VNil, VUnspecified, VPair, VClosure, VMacro, VBuiltin, VContinuation),
     showValue,
     showValueIO,
     showValueKind,
@@ -59,7 +60,8 @@ import Scheme.Number (Number, numberToText)
 
 {- | Runtime value.
 
-Mutually recursive with 'Env' via 'VClosure' and with 'Eval' via 'VBuiltin'.
+Mutually recursive with 'Env' via 'VClosure' and with 'Eval' via 'VBuiltin'
+and 'VContinuation'.
 -}
 data Value
     = VNum Number
@@ -77,6 +79,8 @@ data Value
       VMacro Params Body Env
     | -- | Builtin procedure. The name is retained for display and error messages.
       VBuiltin Text ([Value] -> Eval Value)
+    | -- | First-class continuation captured by @call/cc@.
+      VContinuation (Value -> Eval Value)
     | -- | Placeholder used while evaluating recursive bindings.
       VUninitialized Text
 
@@ -96,6 +100,7 @@ showValue v = case v of
     VClosure{} -> "<closure>"
     VMacro{} -> "<macro>"
     VBuiltin name _ -> "<builtin: " <> name <> ">"
+    VContinuation{} -> "<continuation>"
     VUninitialized name -> "<uninitialized: " <> name <> ">"
 
 -- | Display a value, traversing pairs in 'IO'.
@@ -187,6 +192,7 @@ showValueKind v = case v of
     VClosure{} -> "closure"
     VMacro{} -> "macro"
     VBuiltin{} -> "builtin"
+    VContinuation{} -> "continuation"
     VUninitialized{} -> "uninitialized"
 
 -- * Environment

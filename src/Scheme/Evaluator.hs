@@ -42,10 +42,21 @@ import Scheme.Runtime (
     Env,
     Eval,
     EvalError (ArityError, NotAProcedure),
-    Value (VBool, VBuiltin, VClosure, VMacro, VNil, VNum, VPair, VStr, VSym, VUnspecified),
+    Value (
+        VBool,
+        VBuiltin,
+        VClosure,
+        VContinuation,
+        VMacro,
+        VNil,
+        VNum,
+        VPair,
+        VStr,
+        VSym,
+        VUnspecified
+    ),
     bindInFrame,
     bindUninitializedInFrame,
-    defineUninitializedVar,
     defineVar,
     lookupVar,
     newChildFrame,
@@ -54,64 +65,143 @@ import Scheme.Runtime (
  )
 import Scheme.SExpr (SExpr (SBool, SNil, SNum, SPair, SStr, SSym))
 
-data EvalStep
-    = StepDone Value
-    | StepExpr Env Expr
-    | StepBody Env Body
-    | StepSequence Env [Expr]
-    | StepApply Value [Value]
-    | StepDo Env Env [(Id, Expr, Expr)] (Expr, [Expr]) Body
+type Binding = (Id, Expr)
+type EvaluatedBinding = (Id, Value)
+type DoBinding = (Id, Expr, Expr)
+type DoTest = (Expr, [Expr])
+type CondClause = (Expr, NonEmpty Expr)
+
+data EvalState
+    = Done Value
+    | Continue Kont Value
+    | EvalExpr Env Expr Kont
+    | EvalBody Env Body Kont
+    | EvalSequence Env [Expr] Kont
+    | Apply Value [Value] Kont
+    | EvalLetStar Env [Binding] Body Kont
+    | EvalDoIteration Env Env [DoBinding] DoTest Body Kont
+
+data Kont
+    = KDone
+    | KDefine Env Id Kont
+    | KSet Env Id Kont
+    | KIf Env Expr (Maybe Expr) Kont
+    | KSequence Env [Expr] Kont
+    | KAppFun Env [Expr] Kont
+    | KAppArg Env Value [Value] [Expr] Kont
+    | KBodyDefine Env Id [Define] [EvaluatedBinding] (NonEmpty Expr) Kont
+    | KLet Env Id [Binding] [EvaluatedBinding] Body Kont
+    | KLetStarBind Env Id [Binding] Body Kont
+    | KLetrec Env Id [Binding] [EvaluatedBinding] Body Kont
+    | KAnd Env [Expr] Kont
+    | KOr Env [Expr] Kont
+    | KCond Env (NonEmpty Expr) [CondClause] (Maybe (NonEmpty Expr)) Kont
+    | KDoInit Env [DoBinding] Id [DoBinding] [EvaluatedBinding] DoTest Body Kont
+    | KDoTest Env Env [DoBinding] DoTest Body Kont
+    | KDoBody Env Env [DoBinding] DoTest Body Kont
+    | KDoStep Env Env [DoBinding] Id [DoBinding] [EvaluatedBinding] DoTest Body Kont
 
 -- | Evaluate a single expression in the 'Eval' monad.
 evaluate :: Expr -> Eval Value
 evaluate expr = do
     env <- ask
-    drive (StepExpr env expr)
-
-drive :: EvalStep -> Eval Value
-drive step = do
-    liftIO yield
-    case step of
-        StepDone value -> pure value
-        StepExpr env expr -> local (const env) (evalTail expr) >>= drive
-        StepBody env body -> local (const env) (evalBodyTail body) >>= drive
-        StepSequence env exprs -> local (const env) (evalSequenceTail exprs) >>= drive
-        StepApply procedure args -> applyTail procedure args >>= drive
-        StepDo parentEnv iterationEnv bindings test body ->
-            local (const iterationEnv) (evalDoIterationTail parentEnv iterationEnv bindings test body) >>= drive
-
-evalTail :: Expr -> Eval EvalStep
-evalTail expr = case expr of
-    ELit lit -> pure $ StepDone (literalToValue lit)
-    EVar ident -> StepDone <$> lookupVar ident
-    ELambda params body -> StepDone . VClosure params body <$> ask
-    EApp fExpr argExprs -> do
-        -- Function and arguments are evaluated left-to-right, following
-        -- 'traverse's sequencing in 'Eval'.
-        f <- evaluate fExpr
-        args <- traverse evaluate argExprs
-        pure $ StepApply f args
-    EQuote sexpr -> StepDone <$> quoteToValue sexpr
-    ESet ident rhs -> do
-        value <- evaluate rhs
-        setVar ident value
-        pure $ StepDone VUnspecified
-    ELet name bindings body -> evalLetTail name bindings body
-    ELetStar bindings body -> evalLetStarTail bindings body
-    ELetrec bindings body -> evalLetrecTail bindings body
-    EIf cond thenExpr elseExpr -> evalIfTail cond thenExpr elseExpr
-    ECond clauses -> evalCondTail clauses
-    EAnd exprs -> evalAndTail exprs
-    EOr exprs -> evalOrTail exprs
-    EBegin exprs -> evalSequenceTail exprs
-    EDo bindings test body -> evalDoTail bindings test body
+    drive (EvalExpr env expr KDone)
 
 -- | Evaluate a top-level definition in the current environment.
 evaluateDefine :: Define -> Eval Value
 evaluateDefine (Define ident rhs) = do
-    value <- evaluate rhs
-    defineVar ident value
-    pure VUnspecified
+    env <- ask
+    drive (EvalExpr env rhs (KDefine env ident KDone))
+
+drive :: EvalState -> Eval Value
+drive machine = do
+    liftIO yield
+    case machine of
+        Done value -> pure value
+        _ -> step machine >>= drive
+
+step :: EvalState -> Eval EvalState
+step machine = case machine of
+    Done{} -> pure machine
+    Continue kont value -> continue kont value
+    EvalExpr env expr kont -> evalExpr env expr kont
+    EvalBody env body kont -> evalBodyState env body kont
+    EvalSequence env exprs kont -> evalSequenceState env exprs kont
+    Apply procedure args kont -> applyProcedure procedure args kont
+    EvalLetStar env bindings body kont -> evalLetStarState env bindings body kont
+    EvalDoIteration parentEnv iterationEnv bindings test body kont ->
+        pure $ EvalExpr iterationEnv (fst test) (KDoTest parentEnv iterationEnv bindings test body kont)
+
+evalExpr :: Env -> Expr -> Kont -> Eval EvalState
+evalExpr env expr kont = case expr of
+    ELit lit -> pure $ Continue kont (literalToValue lit)
+    EVar ident -> Continue kont <$> local (const env) (lookupVar ident)
+    ELambda params body -> pure $ Continue kont (VClosure params body env)
+    EApp fExpr argExprs -> pure $ EvalExpr env fExpr (KAppFun env argExprs kont)
+    EQuote sexpr -> Continue kont <$> quoteToValue sexpr
+    ESet ident rhs -> pure $ EvalExpr env rhs (KSet env ident kont)
+    ELet name bindings body -> evalLetState env name bindings body kont
+    ELetStar bindings body -> pure $ EvalLetStar env bindings body kont
+    ELetrec bindings body -> evalLetrecState env bindings body kont
+    EIf cond thenExpr elseExpr -> pure $ EvalExpr env cond (KIf env thenExpr elseExpr kont)
+    ECond clauses -> pure $ evalCondState env clauses kont
+    EAnd exprs -> pure $ evalAndState env exprs kont
+    EOr exprs -> pure $ evalOrState env exprs kont
+    EBegin exprs -> pure $ EvalSequence env exprs kont
+    EDo bindings test body -> evalDoState env bindings test body kont
+
+continue :: Kont -> Value -> Eval EvalState
+continue kont value = case kont of
+    KDone -> pure $ Done value
+    KDefine env ident next -> do
+        local (const env) (defineVar ident value)
+        pure $ Continue next VUnspecified
+    KSet env ident next -> do
+        local (const env) (setVar ident value)
+        pure $ Continue next VUnspecified
+    KIf env thenExpr elseExpr next ->
+        if truthy value
+            then pure $ EvalExpr env thenExpr next
+            else pure $ maybe (Continue next VUnspecified) (\expr -> EvalExpr env expr next) elseExpr
+    KSequence env rest next ->
+        pure $ EvalSequence env rest next
+    KAppFun env argExprs next ->
+        pure $ evalApplicationArgs env value argExprs next
+    KAppArg env procedure revArgs rest next -> do
+        let revArgs' = value : revArgs
+        pure $ case rest of
+            [] -> Apply procedure (reverse revArgs') next
+            argExpr : remaining -> EvalExpr env argExpr (KAppArg env procedure revArgs' remaining next)
+    KBodyDefine env ident rest acc exprs next ->
+        continueBodyDefine env ident rest acc exprs next value
+    KLet env ident rest acc body next ->
+        continueLet env ident rest acc body next value
+    KLetStarBind env ident rest body next ->
+        continueLetStar env ident rest body next value
+    KLetrec env ident rest acc body next ->
+        continueLetrec env ident rest acc body next value
+    KAnd env rest next ->
+        if truthy value
+            then pure $ evalAndState env rest next
+            else pure $ Continue next (VBool False)
+    KOr env rest next ->
+        if truthy value
+            then pure $ Continue next value
+            else pure $ evalOrState env rest next
+    KCond env body rest elseClause next ->
+        if truthy value
+            then pure $ EvalSequence env (nonEmptyToList body) next
+            else pure $ evalCondClauses env rest elseClause next
+    KDoInit parentEnv bindings ident rest acc test body next ->
+        continueDoInit parentEnv bindings ident rest acc test body next value
+    KDoTest parentEnv iterationEnv bindings test body next ->
+        if truthy value
+            then pure $ EvalSequence iterationEnv (snd test) next
+            else pure $ EvalBody iterationEnv body (KDoBody parentEnv iterationEnv bindings test body next)
+    KDoBody parentEnv iterationEnv bindings test body next ->
+        evalDoStepsState parentEnv iterationEnv bindings test body next
+    KDoStep parentEnv iterationEnv bindings ident rest acc test body next ->
+        continueDoStep parentEnv iterationEnv bindings ident rest acc test body next value
 
 literalToValue :: Literal -> Value
 literalToValue lit = case lit of
@@ -120,20 +210,40 @@ literalToValue lit = case lit of
     LStr s -> VStr s
     LNil -> VNil
 
-applyTail :: Value -> [Value] -> Eval EvalStep
-applyTail (VBuiltin _ f) args = StepDone <$> f args
-applyTail (VClosure params body closureEnv) args = do
+applyProcedure :: Value -> [Value] -> Kont -> Eval EvalState
+applyProcedure (VBuiltin name f) args kont
+    | isCallCCBuiltin name = applyCallCC name args kont
+    | otherwise = Continue kont <$> f args
+applyProcedure (VClosure params body closureEnv) args kont = do
     callEnv <- liftIO $ newChildFrame closureEnv
     bindParams params args callEnv
-    pure $ StepBody callEnv body
-applyTail v _ = throwError $ NotAProcedure (showValueKind v)
+    pure $ EvalBody callEnv body kont
+applyProcedure (VContinuation resume) args _ = case args of
+    [arg] -> Done <$> resume arg
+    _ -> throwArityError ("continuation: expected exactly 1 argument, got " <> show (length args))
+applyProcedure value _ _ =
+    throwError $ NotAProcedure (showValueKind value)
+
+applyCallCC :: Text -> [Value] -> Kont -> Eval EvalState
+applyCallCC name args kont = case args of
+    [procedure] ->
+        pure $
+            Apply
+                procedure
+                [VContinuation (drive . Continue kont)]
+                kont
+    _ -> throwArityError (name <> ": expected exactly 1 argument, got " <> show (length args))
+
+isCallCCBuiltin :: Text -> Bool
+isCallCCBuiltin name =
+    name == "call/cc" || name == "call-with-current-continuation"
 
 -- | Apply a macro transformer to already-quoted syntax arguments.
 applyMacro :: Value -> [Value] -> Eval Value
 applyMacro (VMacro params body closureEnv) args = do
     callEnv <- liftIO $ newChildFrame closureEnv
     bindParams params args callEnv
-    local (const callEnv) (evalBody body)
+    drive (EvalBody callEnv body KDone)
 applyMacro v _ = throwError $ NotAProcedure (showValueKind v)
 
 bindParams :: Params -> [Value] -> Env -> Eval ()
@@ -171,169 +281,222 @@ bindFixed names values frame =
     for_ (zip names values) $ \(name, value) ->
         liftIO $ bindInFrame name value frame
 
-evalLetTail :: Maybe Id -> [(Id, Expr)] -> Body -> Eval EvalStep
-evalLetTail Nothing bindings body = do
-    env <- ask
-    evaluatedBindings <- traverse evalBinding bindings
+evalBodyState :: Env -> Body -> Kont -> Eval EvalState
+evalBodyState env (Body defines exprs) kont = do
+    for_ defines $ \(Define ident _) ->
+        liftIO $ bindUninitializedInFrame ident env
+    pure $ case defines of
+        [] -> EvalSequence env (nonEmptyToList exprs) kont
+        Define ident rhs : rest -> EvalExpr env rhs (KBodyDefine env ident rest [] exprs kont)
+
+continueBodyDefine ::
+    Env ->
+    Id ->
+    [Define] ->
+    [EvaluatedBinding] ->
+    NonEmpty Expr ->
+    Kont ->
+    Value ->
+    Eval EvalState
+continueBodyDefine env ident rest acc exprs kont value =
+    let acc' = (ident, value) : acc
+     in case rest of
+            [] -> do
+                setBindings env (reverse acc')
+                pure $ EvalSequence env (nonEmptyToList exprs) kont
+            Define nextIdent rhs : remaining ->
+                pure $ EvalExpr env rhs (KBodyDefine env nextIdent remaining acc' exprs kont)
+
+evalSequenceState :: Env -> [Expr] -> Kont -> Eval EvalState
+evalSequenceState env exprs kont =
+    pure $ case exprs of
+        [] -> Continue kont VUnspecified
+        [expr] -> EvalExpr env expr kont
+        expr : rest -> EvalExpr env expr (KSequence env rest kont)
+
+evalApplicationArgs :: Env -> Value -> [Expr] -> Kont -> EvalState
+evalApplicationArgs env procedure argExprs kont = case argExprs of
+    [] -> Apply procedure [] kont
+    argExpr : rest -> EvalExpr env argExpr (KAppArg env procedure [] rest kont)
+
+evalLetState :: Env -> Maybe Id -> [Binding] -> Body -> Kont -> Eval EvalState
+evalLetState env Nothing bindings body kont = case bindings of
+    [] -> do
+        child <- liftIO $ newChildFrame env
+        pure $ EvalBody child body kont
+    (ident, rhs) : rest ->
+        pure $ EvalExpr env rhs (KLet env ident rest [] body kont)
+evalLetState env (Just name) bindings body kont = do
     child <- liftIO $ newChildFrame env
-    for_ evaluatedBindings $ \(ident, value) ->
-        liftIO $ bindInFrame ident value child
-    pure $ StepBody child body
-evalLetTail (Just name) bindings body = do
-    env <- ask
-    child <- liftIO $ newChildFrame env
-    let params = Params (fmap fst bindings) Nothing
+    let params = Params (fst <$> bindings) Nothing
         closure = VClosure params body child
     liftIO $ bindInFrame name closure child
-    args <- traverse (evaluate . snd) bindings
-    pure $ StepApply closure args
+    pure $ evalApplicationArgs env closure (snd <$> bindings) kont
 
-evalBinding :: (Id, Expr) -> Eval (Id, Value)
-evalBinding (ident, rhs) = do
-    value <- evaluate rhs
-    pure (ident, value)
+continueLet ::
+    Env ->
+    Id ->
+    [Binding] ->
+    [EvaluatedBinding] ->
+    Body ->
+    Kont ->
+    Value ->
+    Eval EvalState
+continueLet env ident rest acc body kont value =
+    let acc' = (ident, value) : acc
+     in case rest of
+            [] -> do
+                child <- liftIO $ newChildFrame env
+                bindValues child (reverse acc')
+                pure $ EvalBody child body kont
+            (nextIdent, rhs) : remaining ->
+                pure $ EvalExpr env rhs (KLet env nextIdent remaining acc' body kont)
 
-evalLetStarTail :: [(Id, Expr)] -> Body -> Eval EvalStep
-evalLetStarTail bindings body = do
-    env <- ask
+evalLetStarState :: Env -> [Binding] -> Body -> Kont -> Eval EvalState
+evalLetStarState env bindings body kont = do
     base <- liftIO $ newChildFrame env
-    go base bindings
-  where
-    go :: Env -> [(Id, Expr)] -> Eval EvalStep
-    go env [] = pure $ StepBody env body
-    go env ((ident, rhs) : rest) = do
-        value <- local (const env) (evaluate rhs)
-        child <- liftIO $ newChildFrame env
-        liftIO $ bindInFrame ident value child
-        go child rest
+    pure $ case bindings of
+        [] -> EvalBody base body kont
+        (ident, rhs) : rest -> EvalExpr base rhs (KLetStarBind base ident rest body kont)
 
-evalLetrecTail :: [(Id, Expr)] -> Body -> Eval EvalStep
-evalLetrecTail bindings body = do
-    env <- ask
+continueLetStar :: Env -> Id -> [Binding] -> Body -> Kont -> Value -> Eval EvalState
+continueLetStar env ident rest body kont value = do
+    child <- liftIO $ newChildFrame env
+    liftIO $ bindInFrame ident value child
+    pure $ case rest of
+        [] -> EvalBody child body kont
+        (nextIdent, rhs) : remaining -> EvalExpr child rhs (KLetStarBind child nextIdent remaining body kont)
+
+evalLetrecState :: Env -> [Binding] -> Body -> Kont -> Eval EvalState
+evalLetrecState env bindings body kont = do
     child <- liftIO $ newChildFrame env
     for_ bindings $ \(ident, _) ->
         liftIO $ bindUninitializedInFrame ident child
-    local (const child) $ do
-        evaluatedBindings <- traverse evalBinding bindings
-        for_ evaluatedBindings $ uncurry setVar
-        pure $ StepBody child body
+    pure $ case bindings of
+        [] -> EvalBody child body kont
+        (ident, rhs) : rest -> EvalExpr child rhs (KLetrec child ident rest [] body kont)
 
-evalIfTail :: Expr -> Expr -> Maybe Expr -> Eval EvalStep
-evalIfTail cond thenExpr elseExpr = do
-    condValue <- evaluate cond
-    env <- ask
-    if truthy condValue
-        then pure $ StepExpr env thenExpr
-        else pure $ maybe (StepDone VUnspecified) (StepExpr env) elseExpr
-
-evalCondTail :: CondClauses -> Eval EvalStep
-evalCondTail (CondElseOnly body) = evalNonEmptyTail body
-evalCondTail (CondClauses (firstClause :| restClauses) elseClause) =
-    go (firstClause : restClauses)
-  where
-    go :: [(Expr, NonEmpty Expr)] -> Eval EvalStep
-    go [] = maybe (pure $ StepDone VUnspecified) evalNonEmptyTail elseClause
-    go ((test, body) : rest) = do
-        testValue <- evaluate test
-        if truthy testValue
-            then evalNonEmptyTail body
-            else go rest
-
-evalAndTail :: [Expr] -> Eval EvalStep
-evalAndTail [] = pure $ StepDone (VBool True)
-evalAndTail [expr] = do
-    env <- ask
-    pure $ StepExpr env expr
-evalAndTail (expr : rest) = do
-    value <- evaluate expr
-    if truthy value
-        then evalAndTail rest
-        else pure $ StepDone (VBool False)
-
-evalOrTail :: [Expr] -> Eval EvalStep
-evalOrTail [] = pure $ StepDone (VBool False)
-evalOrTail [expr] = do
-    env <- ask
-    pure $ StepExpr env expr
-evalOrTail (expr : rest) = do
-    value <- evaluate expr
-    if truthy value
-        then pure $ StepDone value
-        else evalOrTail rest
-
-evalDoTail :: [(Id, Expr, Expr)] -> (Expr, [Expr]) -> Body -> Eval EvalStep
-evalDoTail bindings test body = do
-    env <- ask
-    initValues <- traverse evalInit bindings
-    firstIterationEnv <- liftIO $ bindIterationFrame env initValues
-    pure $ StepDo env firstIterationEnv bindings test body
-  where
-    bindIterationFrame :: Env -> [(Id, Value)] -> IO Env
-    bindIterationFrame parentEnv values = do
-        iterationEnv <- newChildFrame parentEnv
-        for_ values $ \(ident, value) ->
-            bindInFrame ident value iterationEnv
-        pure iterationEnv
-
-    evalInit :: (Id, Expr, Expr) -> Eval (Id, Value)
-    evalInit (ident, initExpr, _) = do
-        value <- evaluate initExpr
-        pure (ident, value)
-
-evalDoIterationTail ::
+continueLetrec ::
     Env ->
-    Env ->
-    [(Id, Expr, Expr)] ->
-    (Expr, [Expr]) ->
+    Id ->
+    [Binding] ->
+    [EvaluatedBinding] ->
     Body ->
-    Eval EvalStep
-evalDoIterationTail parentEnv _ bindings (testExpr, resultExprs) body = do
-    testValue <- evaluate testExpr
-    if truthy testValue
-        then evalSequenceTail resultExprs
-        else do
-            _ <- evalBody body
-            stepValues <- traverse evalStep bindings
-            nextEnv <- liftIO $ bindIterationFrame parentEnv stepValues
-            pure $ StepDo parentEnv nextEnv bindings (testExpr, resultExprs) body
-  where
-    bindIterationFrame :: Env -> [(Id, Value)] -> IO Env
-    bindIterationFrame parent values = do
-        iterationEnv <- newChildFrame parent
-        for_ values $ \(ident, value) ->
-            bindInFrame ident value iterationEnv
-        pure iterationEnv
+    Kont ->
+    Value ->
+    Eval EvalState
+continueLetrec env ident rest acc body kont value =
+    let acc' = (ident, value) : acc
+     in case rest of
+            [] -> do
+                setBindings env (reverse acc')
+                pure $ EvalBody env body kont
+            (nextIdent, rhs) : remaining ->
+                pure $ EvalExpr env rhs (KLetrec env nextIdent remaining acc' body kont)
 
-    evalStep :: (Id, Expr, Expr) -> Eval (Id, Value)
-    evalStep (ident, _, stepExpr) = do
-        value <- evaluate stepExpr
-        pure (ident, value)
+evalCondState :: Env -> CondClauses -> Kont -> EvalState
+evalCondState env clauses kont = case clauses of
+    CondElseOnly body -> EvalSequence env (nonEmptyToList body) kont
+    CondClauses (firstClause :| restClauses) elseClause ->
+        evalCondClauses env (firstClause : restClauses) elseClause kont
 
-evalBody :: Body -> Eval Value
-evalBody body = evalBodyTail body >>= drive
+evalCondClauses ::
+    Env ->
+    [CondClause] ->
+    Maybe (NonEmpty Expr) ->
+    Kont ->
+    EvalState
+evalCondClauses env clauses elseClause kont = case clauses of
+    [] -> maybe (Continue kont VUnspecified) (\body -> EvalSequence env (nonEmptyToList body) kont) elseClause
+    (test, body) : rest -> EvalExpr env test (KCond env body rest elseClause kont)
 
-evalBodyTail :: Body -> Eval EvalStep
-evalBodyTail (Body defines exprs) = do
-    for_ defines $ \(Define ident _) ->
-        defineUninitializedVar ident
-    evaluatedDefines <- forM defines $ \(Define ident rhs) -> do
-        value <- evaluate rhs
-        pure (ident, value)
-    for_ evaluatedDefines $ uncurry setVar
-    evalNonEmptyTail exprs
+evalAndState :: Env -> [Expr] -> Kont -> EvalState
+evalAndState env exprs kont = case exprs of
+    [] -> Continue kont (VBool True)
+    [expr] -> EvalExpr env expr kont
+    expr : rest -> EvalExpr env expr (KAnd env rest kont)
 
-evalNonEmptyTail :: NonEmpty Expr -> Eval EvalStep
-evalNonEmptyTail (expr :| rest) = evalSequenceTail (expr : rest)
+evalOrState :: Env -> [Expr] -> Kont -> EvalState
+evalOrState env exprs kont = case exprs of
+    [] -> Continue kont (VBool False)
+    [expr] -> EvalExpr env expr kont
+    expr : rest -> EvalExpr env expr (KOr env rest kont)
 
-evalSequenceTail :: [Expr] -> Eval EvalStep
-evalSequenceTail [] = pure $ StepDone VUnspecified
-evalSequenceTail [expr] = do
-    env <- ask
-    pure $ StepExpr env expr
-evalSequenceTail (expr : rest) = do
-    _ <- evaluate expr
-    env <- ask
-    pure $ StepSequence env rest
+evalDoState :: Env -> [DoBinding] -> DoTest -> Body -> Kont -> Eval EvalState
+evalDoState parentEnv bindings test body kont = case bindings of
+    [] -> do
+        iterationEnv <- liftIO $ bindIterationFrame parentEnv []
+        pure $ EvalDoIteration parentEnv iterationEnv bindings test body kont
+    (ident, initExpr, _) : rest ->
+        pure $ EvalExpr parentEnv initExpr (KDoInit parentEnv bindings ident rest [] test body kont)
+
+continueDoInit ::
+    Env ->
+    [DoBinding] ->
+    Id ->
+    [DoBinding] ->
+    [EvaluatedBinding] ->
+    DoTest ->
+    Body ->
+    Kont ->
+    Value ->
+    Eval EvalState
+continueDoInit parentEnv bindings ident rest acc test body kont value =
+    let acc' = (ident, value) : acc
+     in case rest of
+            [] -> do
+                iterationEnv <- liftIO $ bindIterationFrame parentEnv (reverse acc')
+                pure $ EvalDoIteration parentEnv iterationEnv bindings test body kont
+            (nextIdent, initExpr, _) : remaining ->
+                pure $ EvalExpr parentEnv initExpr (KDoInit parentEnv bindings nextIdent remaining acc' test body kont)
+
+evalDoStepsState :: Env -> Env -> [DoBinding] -> DoTest -> Body -> Kont -> Eval EvalState
+evalDoStepsState parentEnv iterationEnv bindings test body kont = case bindings of
+    [] -> do
+        nextEnv <- liftIO $ bindIterationFrame parentEnv []
+        pure $ EvalDoIteration parentEnv nextEnv bindings test body kont
+    (ident, _, stepExpr) : rest ->
+        pure $ EvalExpr iterationEnv stepExpr (KDoStep parentEnv iterationEnv bindings ident rest [] test body kont)
+
+continueDoStep ::
+    Env ->
+    Env ->
+    [DoBinding] ->
+    Id ->
+    [DoBinding] ->
+    [EvaluatedBinding] ->
+    DoTest ->
+    Body ->
+    Kont ->
+    Value ->
+    Eval EvalState
+continueDoStep parentEnv iterationEnv bindings ident rest acc test body kont value =
+    let acc' = (ident, value) : acc
+     in case rest of
+            [] -> do
+                nextEnv <- liftIO $ bindIterationFrame parentEnv (reverse acc')
+                pure $ EvalDoIteration parentEnv nextEnv bindings test body kont
+            (nextIdent, _, stepExpr) : remaining ->
+                pure $ EvalExpr iterationEnv stepExpr (KDoStep parentEnv iterationEnv bindings nextIdent remaining acc' test body kont)
+
+bindIterationFrame :: Env -> [EvaluatedBinding] -> IO Env
+bindIterationFrame parentEnv values = do
+    iterationEnv <- newChildFrame parentEnv
+    for_ values $ \(ident, value) ->
+        bindInFrame ident value iterationEnv
+    pure iterationEnv
+
+bindValues :: Env -> [EvaluatedBinding] -> Eval ()
+bindValues env values =
+    for_ values $ \(ident, value) ->
+        liftIO $ bindInFrame ident value env
+
+setBindings :: Env -> [EvaluatedBinding] -> Eval ()
+setBindings env values =
+    local (const env) . for_ values $ uncurry setVar
+
+nonEmptyToList :: NonEmpty a -> [a]
+nonEmptyToList (value :| values) = value : values
 
 quoteToValue :: SExpr -> Eval Value
 quoteToValue sexpr = case sexpr of
