@@ -827,7 +827,7 @@ interpreterRunIn =
                     env <- Interpreter.initialEnv
                     result <- Interpreter.runSourceIn env "(define x 1)\n(+ x 2)"
                     after <- Interpreter.runIn env "x"
-                    assertEqual "" (Right ["(unspecified)", "3"], Right "1") (result, after)
+                    assertEqual "" (Right ["3"], Right "1") (result, after)
             , "load evaluates a file in the shared env"
                 ~: TestCase
                 $ do
@@ -846,7 +846,7 @@ interpreterRunIn =
                     TIO.writeFile mainPath "(load \"scheme-interpreter-load-dep.scm\")\n(+ loaded-from-file 2)\n"
                     env <- Interpreter.initialEnv
                     result <- Interpreter.runFileIn env mainPath
-                    assertEqual "" (Right ["(unspecified)", "42"]) result
+                    assertEqual "" (Right ["42"]) result
             ]
 
 main :: IO ()

@@ -11,9 +11,11 @@ Public entry points:
     The environment is shared by reference; later updates from prior
     calls remain visible.
   * 'runSourceIn' evaluates a text containing zero or more top-level forms
-    in order, using the same environment throughout.
+    in order, using the same environment throughout. Unspecified results are
+    omitted from the returned output list.
   * 'runFileIn' reads a Scheme source file and evaluates all top-level
-    forms in order. It is also the implementation behind top-level @load@.
+    forms in order, omitting unspecified results. It is also the implementation
+    behind top-level @load@.
   * 'run' is a convenience wrapper that creates a fresh environment for
     a single evaluation, suitable for tests and one-shot scripts.
 
@@ -87,41 +89,53 @@ runSourceWithBaseDir baseDir sourceName env input = case parseFile sourceName in
 evalSExprs :: FilePath -> Env -> [SExpr] -> IO (Either Text [Text])
 evalSExprs _ _ [] = pure $ Right []
 evalSExprs baseDir env (sexpr : rest) = do
-    result <- evalSExprIn baseDir env sexpr
+    result <- evalSExprValueIn baseDir env sexpr
     case result of
         Left err -> pure $ Left err
-        Right output -> do
+        Right value -> do
+            output <- visibleOutput value
             restResult <- evalSExprs baseDir env rest
-            pure $ (output :) <$> restResult
+            pure $ maybe id (:) output <$> restResult
 
 evalSExprIn :: FilePath -> Env -> SExpr -> IO (Either Text Text)
 evalSExprIn baseDir env sexpr = do
+    result <- evalSExprValueIn baseDir env sexpr
+    case result of
+        Left err -> pure $ Left err
+        Right value -> Right <$> showValueIO value
+
+evalSExprValueIn :: FilePath -> Env -> SExpr -> IO (Either Text Value)
+evalSExprValueIn baseDir env sexpr = do
     expanded <- runEval env (expandToplevel sexpr)
     case expanded of
         Left err -> pure $ Left ("macro error: " <> prettyEvalError err)
-        Right ExpandedMacroDefinition -> Right <$> showValueIO VUnspecified
+        Right ExpandedMacroDefinition -> pure $ Right VUnspecified
         Right (ExpandedExpression expandedSExpr) -> case analyzeToplevel expandedSExpr of
             Left (AnalyzeError msg) -> pure $ Left ("analyze error: " <> msg)
-            Right toplevel -> evalToplevelIn baseDir env toplevel
+            Right toplevel -> evalToplevelValueIn baseDir env toplevel
 
-evalToplevelIn :: FilePath -> Env -> Toplevel -> IO (Either Text Text)
-evalToplevelIn baseDir env toplevel = case toplevel of
+evalToplevelValueIn :: FilePath -> Env -> Toplevel -> IO (Either Text Value)
+evalToplevelValueIn baseDir env toplevel = case toplevel of
     TExpr expr -> do
         result <- runEval env (evaluate expr)
-        formatEvalResult result
+        pure $ formatEvalResult result
     TDefine define -> do
         result <- runEval env (evaluateDefine define)
-        formatEvalResult result
+        pure $ formatEvalResult result
     TLoad path -> do
         result <- runFileIn env (resolvePath baseDir path)
         case result of
             Left err -> pure $ Left err
-            Right _ -> Right <$> showValueIO VUnspecified
+            Right _ -> pure $ Right VUnspecified
 
-formatEvalResult :: Either EvalError Value -> IO (Either Text Text)
+formatEvalResult :: Either EvalError Value -> Either Text Value
 formatEvalResult result = case result of
-    Left err -> pure $ Left ("eval error: " <> prettyEvalError err)
-    Right v -> Right <$> showValueIO v
+    Left err -> Left ("eval error: " <> prettyEvalError err)
+    Right value -> Right value
+
+visibleOutput :: Value -> IO (Maybe Text)
+visibleOutput VUnspecified = pure Nothing
+visibleOutput value = Just <$> showValueIO value
 
 resolvePath :: FilePath -> Text -> FilePath
 resolvePath baseDir pathText =
