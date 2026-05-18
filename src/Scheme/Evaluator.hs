@@ -11,6 +11,7 @@ module Scheme.Evaluator (
     quoteToValue,
 ) where
 
+import Control.Concurrent (yield)
 import Control.Monad.Except (throwError)
 import Scheme.AST (
     Body (Body),
@@ -68,14 +69,16 @@ evaluate expr = do
     drive (StepExpr env expr)
 
 drive :: EvalStep -> Eval Value
-drive step = case step of
-    StepDone value -> pure value
-    StepExpr env expr -> local (const env) (evalTail expr) >>= drive
-    StepBody env body -> local (const env) (evalBodyTail body) >>= drive
-    StepSequence env exprs -> local (const env) (evalSequenceTail exprs) >>= drive
-    StepApply procedure args -> applyTail procedure args >>= drive
-    StepDo parentEnv iterationEnv bindings test body ->
-        local (const iterationEnv) (evalDoIterationTail parentEnv iterationEnv bindings test body) >>= drive
+drive step = do
+    liftIO yield
+    case step of
+        StepDone value -> pure value
+        StepExpr env expr -> local (const env) (evalTail expr) >>= drive
+        StepBody env body -> local (const env) (evalBodyTail body) >>= drive
+        StepSequence env exprs -> local (const env) (evalSequenceTail exprs) >>= drive
+        StepApply procedure args -> applyTail procedure args >>= drive
+        StepDo parentEnv iterationEnv bindings test body ->
+            local (const iterationEnv) (evalDoIterationTail parentEnv iterationEnv bindings test body) >>= drive
 
 evalTail :: Expr -> Eval EvalStep
 evalTail expr = case expr of

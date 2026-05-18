@@ -1,7 +1,12 @@
 module Main (main) where
 
+import Control.Exception (AsyncException (UserInterrupt), catch, throwIO)
 import Data.Text qualified as T
 import Scheme.Interpreter (Env, initialEnv, runFileIn, runIn)
+
+data ReplStep
+    = ReplContinue
+    | ReplStop
 
 main :: IO ()
 main = do
@@ -21,11 +26,14 @@ startRepl = do
 
 runFile :: FilePath -> IO ()
 runFile path = do
-    env <- initialEnv
-    result <- runFileIn env path
+    result <-
+        catchUserInterrupt $ do
+            env <- initialEnv
+            runFileIn env path
     case result of
-        Left err -> putTextLn err *> exitFailure
-        Right outputs -> traverse_ putTextLn outputs
+        Nothing -> putTextLn "Interrupted." *> exitFailure
+        Just (Left err) -> putTextLn err *> exitFailure
+        Just (Right outputs) -> traverse_ putTextLn outputs
 
 printUsage :: IO ()
 printUsage = do
@@ -34,18 +42,38 @@ printUsage = do
 
 repl :: Env -> IO ()
 repl env = do
+    result <- catchUserInterrupt (replStep env)
+    case result of
+        Nothing -> do
+            putTextLn ""
+            putTextLn "Interrupted."
+            repl env
+        Just ReplContinue -> repl env
+        Just ReplStop -> pure ()
+
+replStep :: Env -> IO ReplStep
+replStep env = do
     putText "scheme> "
     hFlush stdout
     eof <- hIsEOF stdin
     if eof
-        then putTextLn ""
+        then putTextLn "" $> ReplStop
         else do
             line <- getLine
             let input = T.strip line
-            unless (input == ":q") $ do
-                unless (T.null input) $ do
-                    result <- runIn env input
-                    case result of
-                        Right output -> putTextLn output
-                        Left err -> putTextLn err
-                repl env
+            if input == ":q"
+                then pure ReplStop
+                else do
+                    unless (T.null input) $ do
+                        result <- runIn env input
+                        case result of
+                            Right output -> putTextLn output
+                            Left err -> putTextLn err
+                    pure ReplContinue
+
+catchUserInterrupt :: IO a -> IO (Maybe a)
+catchUserInterrupt action =
+    catch (Just <$> action) handleInterrupt
+  where
+    handleInterrupt UserInterrupt = pure Nothing
+    handleInterrupt asyncException = throwIO asyncException
