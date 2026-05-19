@@ -24,6 +24,15 @@
 (saved-cont 20) ;; => 21
 (saved-cont 30) ;; => 31
 
+;;; A continuation captured in a top-level definition resumes the pending
+;;; definition context, not only the right-hand-side expression.
+(define saved-define-cont #f)
+(define define-cont-target
+  (call/cc (lambda (k) (set! saved-define-cont k) 1)))
+define-cont-target ;; => 1
+(saved-define-cont 2) ;; => (unspecified)
+define-cont-target ;; => 2
+
 ;;; Early exit from a loop.
 (define find-do
   (lambda (fn ls)
